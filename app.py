@@ -787,6 +787,58 @@ Write-Host "Dashboard import completed for {service_name}!" -ForegroundColor Gre
             prometheus_result = f"❌ Prometheus error: {str(e)}"
             grafana_result = f"❌ Grafana error: {str(e)}"
 
+        # Ensure/update a shared API Gateway Ingress with path-based routing
+        try:
+            gateway_dir = os.path.join(clone_dir, 'gateway')
+            os.makedirs(gateway_dir, exist_ok=True)
+            gateway_file = os.path.join(gateway_dir, 'api-gateway.yaml')
+
+            host_name = 'gateway.local'
+            # Path rule for this service: /api/{service} ...
+            path_block = (
+                f"      - path: /api/{service_name}(/|$)(.*)\n"
+                f"        pathType: Prefix\n"
+                f"        backend:\n"
+                f"          service:\n"
+                f"            name: {service_name}-service\n"
+                f"            port:\n"
+                f"              number: 80\n"
+            )
+
+            if not os.path.exists(gateway_file):
+                # Create new gateway ingress manifest
+                gateway_content = f"""apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: {host_name}
+    http:
+      paths:
+{path_block}"""
+                with open(gateway_file, 'w', encoding='utf-8') as gf:
+                    gf.write(gateway_content)
+            else:
+                # Append path for this service if not present
+                with open(gateway_file, 'r', encoding='utf-8') as gf:
+                    existing = gf.read()
+                if f"/api/{service_name}(/|$)(.*)" not in existing:
+                    # Insert before end keeping indentation (paths list exists)
+                    # Simple append to end of file under assumption of list style
+                    if existing.endswith('\n'):
+                        new_content = existing + path_block
+                    else:
+                        new_content = existing + "\n" + path_block
+                    with open(gateway_file, 'w', encoding='utf-8') as gf:
+                        gf.write(new_content)
+        except Exception as e:
+            print(f"⚠️  Failed to update API Gateway Ingress: {e}")
+
         # Create ArgoCD Application
         apps_dir = os.path.join(clone_dir, 'apps')
         os.makedirs(apps_dir, exist_ok=True)
