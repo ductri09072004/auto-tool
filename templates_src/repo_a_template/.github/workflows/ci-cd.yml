@@ -30,7 +30,7 @@ jobs:
         
     - name: Run tests
       run: |
-        # Tạo test đơn giản nếu chưa có
+        # Táº¡o test Ä‘Æ¡n giáº£n náº¿u chÆ°a cĂ³
         python -c "import app; print('App imports successfully')"
         
     - name: Lint with flake8
@@ -69,7 +69,6 @@ jobs:
           type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
-          type=raw,value=latest-{{date 'YYYYMMDD-HHmmss'}},enable={{is_default_branch}}
           
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
@@ -82,10 +81,7 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
         
-    - name: Output image tags
-      run: |
-        echo "Built and pushed images:"
-        echo "${{ steps.meta.outputs.tags }}"
+    # Removed explicit package visibility change to avoid 404 timing/scope issues
 
   update-manifests:
     needs: build-and-push
@@ -102,36 +98,27 @@ jobs:
         token: ${{ secrets.MANIFESTS_REPO_TOKEN }}
         path: manifests
         
-    - name: Update deployment with new image
+    
+    - name: Update deployment timestamp
       run: |
         cd manifests
-        # Tạo unique tag với timestamp để đảm bảo image mới nhất
+        # Cáº­p nháº­t timestamp annotation Ä‘á»ƒ force restart pods
         TIMESTAMP=$(date +%s)
-        UNIQUE_TAG="latest-${TIMESTAMP}"
-        
-        # Cập nhật image tag với unique tag
-        sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${UNIQUE_TAG}|g" k8s/deployment.yaml
-        
-        # Cập nhật timestamp annotation để force restart pods
         sed -i "s|timestamp: \".*\"|timestamp: \"$TIMESTAMP\"|g" k8s/deployment.yaml
-        
-        # Thêm annotation để force update
+        # ThĂªm annotation Ä‘á»ƒ force update
         sed -i "/timestamp: \"$TIMESTAMP\"/a\        deployment.kubernetes.io/revision: \"$TIMESTAMP\"" k8s/deployment.yaml
-        
-        # Thêm annotation để force image pull
-        sed -i "/deployment.kubernetes.io\/revision: \"$TIMESTAMP\"/a\        kubectl.kubernetes.io/restartedAt: \"$TIMESTAMP\"" k8s/deployment.yaml
-        
-        echo "Updated image to: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${UNIQUE_TAG}"
         echo "Updated timestamp to: $TIMESTAMP"
+
         
-    - name: Verify deployment changes
+    - name: Update image tag
       run: |
         cd manifests
-        echo "=== Deployment.yaml changes ==="
-        cat k8s/deployment.yaml | grep -A 5 -B 5 "image:"
-        echo ""
-        echo "=== Annotations ==="
-        cat k8s/deployment.yaml | grep -A 3 "annotations:"
+        # Cáº­p nháº­t tag image trong deployment.yaml - dĂ¹ng latest Ä‘á»ƒ Ä‘áº£m báº£o pull Ä‘Æ°á»£c image má»›i
+        # VĂ¬ workflow táº¡o cáº£ latest vĂ  main-{SHA} tags, dĂ¹ng latest Ä‘á»ƒ Ä‘áº£m báº£o image tá»“n táº¡i
+        sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest|g" k8s/deployment.yaml
+        # ThĂªm timestamp annotation Ä‘á»ƒ force restart pods
+        TIMESTAMP=$(date +%s)
+        sed -i "s|timestamp: \".*\"|timestamp: \"$TIMESTAMP\"|g" k8s/deployment.yaml
         
     - name: Commit and push changes
       run: |
@@ -139,12 +126,14 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add .
-        git commit -m "Update ${{ github.event.repository.name }} image to latest-$(date +%s) - Force pull new image" || exit 0
+        git commit -m "Update demo_fiss1 image to ${{ github.sha }}" || exit 0
         git push
         
     - name: ArgoCD Auto-Sync
       run: |
         echo "ArgoCD will automatically sync when Repo B is updated..."
+        echo "No manual trigger needed - ArgoCD auto-sync is enabled!"
         echo "Timestamp updated: $(date)"
-        echo "Image tag: latest-$(date +%s)"
-        echo "This will force Kubernetes to pull the latest image from GHCR"
+
+
+
