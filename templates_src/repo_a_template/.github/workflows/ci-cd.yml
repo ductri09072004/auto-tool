@@ -74,9 +74,10 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
+        tags: |
+          ghcr.io/${{ github.repository }}:latest
+          ghcr.io/${{ github.repository }}:main-${{ github.sha }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -101,12 +102,13 @@ jobs:
     - name: Update image tag
       run: |
         cd manifests
-        # Cập nhật tag image trong deployment.yaml - dùng latest để đảm bảo pull được image mới
-        # Vì workflow tạo cả latest và main-{SHA} tags, dùng latest để đảm bảo image tồn tại
-        sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest|g" k8s/deployment.yaml
-        # Thêm timestamp annotation để force restart pods
-        TIMESTAMP=$(date +%s)
-        sed -i "s|timestamp: \".*\"|timestamp: \"$TIMESTAMP\"|g" k8s/deployment.yaml
+        SERVICE="${{ github.event.repository.name }}"
+        FILE="services/$SERVICE/k8s/deployment.yaml"
+        # Cập nhật image với tag duy nhất theo commit
+        sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:main-${{ github.sha }}|g" "$FILE"
+        # Cập nhật timestamp annotation để đảm bảo podTemplateSpec khác → rollout
+        TS=$(date +%s)
+        sed -i "s|timestamp: \".*\"|timestamp: \"$TS\"|g" "$FILE"
         
     - name: Commit and push changes
       run: |
