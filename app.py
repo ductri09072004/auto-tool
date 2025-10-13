@@ -555,6 +555,9 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         services_dir = os.path.join(clone_dir, 'services')
         service_dir = os.path.join(services_dir, service_name)
         target_path = os.path.join(service_dir, 'k8s')
+        # Ensure a clean directory to avoid stale files with old hardcoded names
+        if os.path.isdir(target_path):
+            shutil.rmtree(target_path, ignore_errors=True)
         os.makedirs(target_path, exist_ok=True)
         shutil.copytree(template_b, target_path, dirs_exist_ok=True)
 
@@ -573,6 +576,13 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             '{MIN_REPLICAS}': str(min_replicas),
             '{MAX_REPLICAS}': str(max_replicas),
             '{TIMESTAMP}': timestamp,
+            # Backward-compat: replace legacy hardcoded names if encountered
+            'demo-fiss': namespace,
+            'demo-fiss-api': service_name,
+            'demo-fiss-service': f'{service_name}-service',
+            'demo-fiss-config': f'{namespace}-config',
+            'demo-fiss-ingress': f'{service_name}-ingress',
+            'demo-fiss-hpa': f'{service_name}-hpa',
         }
 
         for root, _, files in os.walk(target_path):
