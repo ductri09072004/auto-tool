@@ -546,7 +546,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         template_b = os.path.join(base_dir, 'templates_src', 'repo_b_template', 'k8s')
         if not os.path.isdir(template_b):
-            fallback = r"E:\\Study\\PJ_demo_fiss1_B\k8s"
+            fallback = r"E:\\Study\\demo_fiss1_B\k8s"
             if os.path.isdir(fallback):
                 template_b = fallback
             else:
