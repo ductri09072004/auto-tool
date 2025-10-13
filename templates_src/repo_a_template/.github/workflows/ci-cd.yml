@@ -57,7 +57,7 @@ jobs:
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
-        password: ${{ secrets.GHCR_TOKEN }}
+        password: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Extract metadata
       id: meta
@@ -96,7 +96,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: ${{ github.repository_owner }}/demo_fiss1_B
-        token: ${{ secrets.GHCR_TOKEN }}
+        token: ${{ secrets.MANIFESTS_REPO_TOKEN }}
         path: manifests
         
     - name: Update image tag
