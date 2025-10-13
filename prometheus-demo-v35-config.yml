@@ -1,7 +1,0 @@
-  # Demo-v35 service
-  - job_name: 'demo-v35-service'
-    static_configs:
-    - targets:
-      - 'host.docker.internal:5035'  # demo-v35 service
-    metrics_path: /metrics
-    scrape_interval: 30s
