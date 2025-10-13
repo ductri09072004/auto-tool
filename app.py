@@ -188,17 +188,27 @@ def generate_repository(service_data, repo_url):
         shutil.copytree(template_src, repo_dir, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns('.git', '__pycache__', '.venv', 'venv', '.pytest_cache'))
 
-        # Replace service placeholders minimally (optional: rename in README)
-        readme_path = os.path.join(repo_dir, 'README.md')
-        try:
-            if os.path.exists(readme_path):
-                with open(readme_path, 'r', encoding='utf-8') as rf:
-                    content = rf.read()
-                content = content.replace('demo_fiss1', service_name)
-                with open(readme_path, 'w', encoding='utf-8') as wf:
-                    wf.write(content)
-        except Exception:
-            pass
+        # Replace placeholders in all files
+        namespace = service_name  # Use service name as namespace
+        repl = {
+            '{SERVICE_NAME}': service_name,
+            '{NAMESPACE}': namespace,
+        }
+        
+        for root, _, files in os.walk(repo_dir):
+            for file in files:
+                if not file.endswith(('.py', '.md', '.yml', '.yaml', '.txt')):
+                    continue
+                p = os.path.join(root, file)
+                try:
+                    with open(p, 'r', encoding='utf-8') as rf:
+                        content = rf.read()
+                    for k, v in repl.items():
+                        content = content.replace(k, v)
+                    with open(p, 'w', encoding='utf-8') as wf:
+                        wf.write(content)
+                except Exception:
+                    pass
 
         # Initialize git repository (compatible with older git)
         proc = subprocess.run(['git', 'init', '-b', 'main'], cwd=repo_dir)
@@ -252,13 +262,32 @@ def generate_repository(service_data, repo_url):
             'error': str(e)
         }
 
-def generate_app_py(repo_dir, service_data):
-    """Generate Flask app.py"""
+def generate_app_py(repo_dir, service_data, namespace):
+    """Generate Flask app.py from template with placeholders replaced"""
     service_name = service_data['service_name']
     port = service_data['port']
-    mock_data_type = service_data['mock_data_type']
-    data_count = service_data['data_count']
-    endpoints = service_data['endpoints']
+    
+    # Copy template and replace placeholders
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    template_file = os.path.join(base_dir, 'templates_src', 'repo_a_template', 'app.py')
+    
+    if os.path.exists(template_file):
+        # Read template
+        with open(template_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Replace placeholders
+        content = content.replace('{SERVICE_NAME}', service_name)
+        content = content.replace('{NAMESPACE}', namespace)
+        
+        # Write to repo
+        with open(os.path.join(repo_dir, 'app.py'), 'w', encoding='utf-8') as f:
+            f.write(content)
+    else:
+        # Fallback to old method if template not found
+        mock_data_type = service_data['mock_data_type']
+        data_count = service_data['data_count']
+        endpoints = service_data['endpoints']
     
     # Generate mock data based on type
     if mock_data_type == 'users':
