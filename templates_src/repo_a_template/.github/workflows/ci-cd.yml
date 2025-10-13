@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+﻿name: CI/CD Pipeline
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
         
     - name: Run tests
       run: |
-        # Tạo test đơn giản nếu chưa có
+        # Táº¡o test Ä‘Æ¡n giáº£n náº¿u chÆ°a cĂ³
         python -c "import app; print('App imports successfully')"
         
     - name: Lint with flake8
@@ -98,13 +98,25 @@ jobs:
         token: ${{ secrets.MANIFESTS_REPO_TOKEN }}
         path: manifests
         
+    
+    - name: Update deployment timestamp
+      run: |
+        cd manifests
+        # Cáº­p nháº­t timestamp annotation Ä‘á»ƒ force restart pods
+        TIMESTAMP=$(date +%s)
+        sed -i "s|timestamp: \".*\"|timestamp: \"$TIMESTAMP\"|g" k8s/deployment.yaml
+        # ThĂªm annotation Ä‘á»ƒ force update
+        sed -i "/timestamp: \"$TIMESTAMP\"/a\        deployment.kubernetes.io/revision: \"$TIMESTAMP\"" k8s/deployment.yaml
+        echo "Updated timestamp to: $TIMESTAMP"
+
+        
     - name: Update image tag
       run: |
         cd manifests
-        # Cập nhật tag image trong deployment.yaml - dùng latest để đảm bảo pull được image mới
-        # Vì workflow tạo cả latest và main-{SHA} tags, dùng latest để đảm bảo image tồn tại
+        # Cáº­p nháº­t tag image trong deployment.yaml - dĂ¹ng latest Ä‘á»ƒ Ä‘áº£m báº£o pull Ä‘Æ°á»£c image má»›i
+        # VĂ¬ workflow táº¡o cáº£ latest vĂ  main-{SHA} tags, dĂ¹ng latest Ä‘á»ƒ Ä‘áº£m báº£o image tá»“n táº¡i
         sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest|g" k8s/deployment.yaml
-        # Thêm timestamp annotation để force restart pods
+        # ThĂªm timestamp annotation Ä‘á»ƒ force restart pods
         TIMESTAMP=$(date +%s)
         sed -i "s|timestamp: \".*\"|timestamp: \"$TIMESTAMP\"|g" k8s/deployment.yaml
         
@@ -122,5 +134,6 @@ jobs:
         echo "ArgoCD will automatically sync when Repo B is updated..."
         echo "No manual trigger needed - ArgoCD auto-sync is enabled!"
         echo "Timestamp updated: $(date)"
+
 
 
