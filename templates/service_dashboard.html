@@ -1085,13 +1085,26 @@
         // Load services from API
         async function loadServices() {
             try {
-                const response = await fetch('/api/services');
+                let url = '/api/services';
+                // Add token if available
+                if (window.dashboardToken) {
+                    url += `?token=${encodeURIComponent(window.dashboardToken)}`;
+                }
+                
+                const response = await fetch(url);
                 const data = await response.json();
-                currentServices = data.services || [];
-                renderServices();
-                updateStats();
+                
+                if (response.ok) {
+                    currentServices = data.services || [];
+                    renderServices();
+                    updateStats();
+                } else {
+                    console.error('Error loading services:', data.error);
+                    showToast(`Failed to load services: ${data.error || 'Unknown error'}`, 'error');
+                }
             } catch (error) {
                 console.error('Error loading services:', error);
+                showToast('Failed to load services. Please check your GitHub token.', 'error');
             }
         }
 
@@ -1555,6 +1568,41 @@
                     button.innerHTML = originalText;
                     button.disabled = false;
                 }
+            }
+        }
+
+        // Apply GitHub token for API calls
+        async function applyGitHubToken() {
+            const tokenInput = document.getElementById('githubTokenInput');
+            const token = tokenInput.value.trim();
+            
+            if (!token) {
+                showToast('Please enter a GitHub token', 'warning');
+                return;
+            }
+            
+            try {
+                // Validate token
+                const response = await fetch('/api/dashboard/set-token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ token: token })
+                });
+                
+                if (response.ok) {
+                    showToast('GitHub token applied successfully!', 'success');
+                    // Store token for future API calls
+                    window.dashboardToken = token;
+                    // Reload services with new token
+                    loadServices();
+                } else {
+                    const error = await response.json();
+                    showToast(`Invalid token: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                showToast('Failed to validate token', 'error');
             }
         }
 

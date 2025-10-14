@@ -9,7 +9,7 @@ from datetime import datetime
 import tempfile
 import time
 from service_manager import ServiceManager
-from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, DASHBOARD_TOKEN
 try:
     # PyNaCl is required to encrypt secrets for GitHub API
     from nacl import encoding, public
@@ -188,8 +188,12 @@ def get_services():
         owner, repo = 'ductri09072004', 'demo_fiss1_B'
 
         headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'dev-portal'}
-        if MANIFESTS_REPO_TOKEN:
-            headers['Authorization'] = f'token {MANIFESTS_REPO_TOKEN}'
+        
+        # Get token from query parameter or use default
+        token_param = request.args.get('token', '')
+        token_to_use = token_param or DASHBOARD_TOKEN or MANIFESTS_REPO_TOKEN
+        if token_to_use:
+            headers['Authorization'] = f'token {token_to_use}'
 
         contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents/services?ref=main"
         resp = requests.get(contents_url, headers=headers)
@@ -310,14 +314,39 @@ def get_services():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/dashboard/set-token', methods=['POST'])
+def set_dashboard_token():
+    """Set dashboard token for read-only operations"""
+    try:
+        data = request.get_json()
+        token = data.get('token', '').strip()
+        
+        if not token:
+            return jsonify({'error': 'Token is required'}), 400
+        
+        # Validate token
+        headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github+json'}
+        test_response = requests.get('https://api.github.com/user', headers=headers)
+        if test_response.status_code != 200:
+            return jsonify({'error': 'Invalid GitHub token'}), 400
+        
+        # Store token in session or return success
+        # For now, just validate and return success
+        return jsonify({'message': 'Token validated successfully'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/services/debug-list', methods=['GET'])
 def debug_list_services():
     try:
         # Fixed GitHub repo for debug listing
         owner, repo = 'ductri09072004', 'demo_fiss1_B'
         headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'dev-portal'}
-        if MANIFESTS_REPO_TOKEN:
-            headers['Authorization'] = f'token {MANIFESTS_REPO_TOKEN}'
+        # Use dashboard token for read-only operations
+        token_to_use = DASHBOARD_TOKEN or MANIFESTS_REPO_TOKEN
+        if token_to_use:
+            headers['Authorization'] = f'token {token_to_use}'
         url = f"https://api.github.com/repos/ductri09072004/demo_fiss1_B/contents/services?ref=main"
         r = requests.get(url, headers=headers)
         out = {

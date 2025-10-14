@@ -11,10 +11,14 @@ GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 GHCR_TOKEN = os.getenv('GHCR_TOKEN', '')
 MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
 
+# Dashboard token - can be set for read-only operations
+DASHBOARD_TOKEN = os.getenv('DASHBOARD_TOKEN', '')
+
 # Token Usage:
 # - GITHUB_TOKEN: For general GitHub API operations (create repos, push code)
 # - GHCR_TOKEN: For GitHub Container Registry (push Docker images)
 # - MANIFESTS_REPO_TOKEN: For Repository B operations (push K8s manifests)
+# - DASHBOARD_TOKEN: For dashboard read-only operations (view services list)
 
 # Monitoring Configuration
 PROMETHEUS_URL = "http://localhost:9090"
