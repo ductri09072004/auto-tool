@@ -14,6 +14,7 @@
         }
         .container {
             padding-top: 2rem;
+            max-width: 1400px;
         }
         .card {
             border: none;
@@ -99,7 +100,7 @@
 <body>
     <div class="container">
         <div class="row justify-content-center">
-            <div class="col-lg-8">
+            <div class="col-12">
                 <!-- Header -->
                 <div class="text-center mb-4">
                     <h1 class="text-white mb-3">
@@ -129,7 +130,7 @@
                         <form id="serviceForm">
                             <!-- Basic Information -->
                             <div class="row mb-4">
-                                <div class="col-md-6">
+                                <div class="col-md-4">
                                     <label for="service_name" class="form-label">
                                         <i class="fas fa-tag me-1"></i>
                                         Service Name *
@@ -137,78 +138,133 @@
                                     <input type="text" class="form-control" id="service_name" name="service_name" 
                                            placeholder="e.g., user-service" required>
                                 </div>
-                                <div class="col-md-6">
-                                    <label for="description" class="form-label">
-                                        <i class="fas fa-info-circle me-1"></i>
-                                        Description
+                                <div class="col-md-4">
+                                    <label for="port" class="form-label">
+                                        <i class="fas fa-network-wired me-1"></i>
+                                        Container Port *
                                     </label>
-                                    <input type="text" class="form-control" id="description" name="description" 
-                                           placeholder="Brief description of your service">
+                                    <input type="number" class="form-control" id="port" name="port" 
+                                           value="5001" min="1000" max="65535" required>
+                                    <small class="text-muted">Port that your service will run on</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="repo_url" class="form-label">
+                                        <i class="fab fa-github me-1"></i>
+                                        GitHub Repository URL *
+                                    </label>
+                                    <input type="url" class="form-control" id="repo_url" name="repo_url" 
+                                           placeholder="https://github.com/your_org/your_repo.git" required>
+                                    <small class="text-muted">Provide an existing empty repository URL with push access.</small>
                                 </div>
                             </div>
 
-                            <div class="mb-4">
-                                <label for="description" class="form-label">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    Description
-                                </label>
-                                <textarea class="form-control" id="description" name="description" 
-                                          rows="2" placeholder="Brief description of your service"></textarea>
-                            </div>
 
-                            <!-- GitHub Repo URL -->
-                            <div class="mb-4">
-                                <label for="repo_url" class="form-label">
-                                    <i class="fab fa-github me-1"></i>
-                                    GitHub Repository URL *
-                                </label>
-                                <input type="url" class="form-control" id="repo_url" name="repo_url" 
-                                       placeholder="https://github.com/your_org/your_repo.git" required>
-                                <small class="text-muted">Provide an existing empty repository URL with push access.</small>
-                            </div>
-
-                            <!-- Mock Data Configuration -->
+                            <!-- Kubernetes Configuration -->
                             <div class="mb-4">
                                 <h5 class="mb-3">
-                                    <i class="fas fa-database me-2"></i>
-                                    Mock Data Configuration
+                                    <i class="fas fa-cogs me-2"></i>
+                                    Kubernetes Configuration
                                 </h5>
-                                <div class="row">
+                                
+                                <!-- Replicas -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label for="replicas" class="form-label">
+                                            <i class="fas fa-layer-group me-1"></i>
+                                            Number of Pods (Replicas)
+                                        </label>
+                                        <input type="number" class="form-control" id="replicas" name="replicas" 
+                                               value="3" min="1" max="10">
+                                        <small class="text-muted">Initial pod instances</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="min_replicas" class="form-label">
+                                            <i class="fas fa-arrow-down me-1"></i>
+                                            Min Replicas (HPA)
+                                        </label>
+                                        <input type="number" class="form-control" id="min_replicas" name="min_replicas" 
+                                               value="2" min="1" max="5">
+                                        <small class="text-muted">Minimum pods for autoscaling</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="max_replicas" class="form-label">
+                                            <i class="fas fa-arrow-up me-1"></i>
+                                            Max Replicas (HPA)
+                                        </label>
+                                        <input type="number" class="form-control" id="max_replicas" name="max_replicas" 
+                                               value="10" min="5" max="20">
+                                        <small class="text-muted">Maximum pods for autoscaling</small>
+                                    </div>
+                                </div>
+
+                                <!-- CPU Configuration -->
+                                <div class="row mb-3">
                                     <div class="col-md-6">
-                                        <label for="mock_data_type" class="form-label">Data Type</label>
-                                        <select class="form-select" id="mock_data_type" name="mock_data_type">
-                                            <option value="users">Users</option>
-                                            <option value="products">Products</option>
-                                            <option value="orders">Orders</option>
+                                        <label for="cpu_request" class="form-label">
+                                            <i class="fas fa-microchip me-1"></i>
+                                            CPU Request
+                                        </label>
+                                        <select class="form-select" id="cpu_request" name="cpu_request">
+                                            <option value="50m">50m (0.05 cores)</option>
+                                            <option value="100m" selected>100m (0.1 cores)</option>
+                                            <option value="200m">200m (0.2 cores)</option>
+                                            <option value="250m">250m (0.25 cores)</option>
+                                            <option value="500m">500m (0.5 cores)</option>
+                                            <option value="750m">750m (0.75 cores)</option>
+                                            <option value="1000m">1000m (1 core)</option>
                                         </select>
+                                        <small class="text-muted">CPU request for each pod</small>
                                     </div>
                                     <div class="col-md-6">
-                                        <label for="data_count" class="form-label">Number of Records</label>
-                                        <input type="number" class="form-control" id="data_count" name="data_count" 
-                                               value="100" min="1" max="10000">
+                                        <label for="cpu_limit" class="form-label">
+                                            <i class="fas fa-microchip me-1"></i>
+                                            CPU Limit
+                                        </label>
+                                        <select class="form-select" id="cpu_limit" name="cpu_limit">
+                                            <option value="100m">100m (0.1 cores)</option>
+                                            <option value="200m" selected>200m (0.2 cores)</option>
+                                            <option value="500m">500m (0.5 cores)</option>
+                                            <option value="750m">750m (0.75 cores)</option>
+                                            <option value="1000m">1000m (1 core)</option>
+                                            <option value="1500m">1500m (1.5 cores)</option>
+                                            <option value="2000m">2000m (2 cores)</option>
+                                        </select>
+                                        <small class="text-muted">CPU limit for each pod</small>
                                     </div>
                                 </div>
-                            </div>
 
-                            <!-- API Endpoints -->
-                            <div class="mb-4">
-                                <h5 class="mb-3">
-                                    <i class="fas fa-code me-2"></i>
-                                    API Endpoints
-                                </h5>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="endpoint_health" 
-                                           name="endpoints" value="/api/health" checked>
-                                    <label class="form-check-label" for="endpoint_health">
-                                        <code>/api/health</code> - Health check endpoint
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="endpoint_data" 
-                                           name="endpoints" value="/api/users" checked>
-                                    <label class="form-check-label" for="endpoint_data">
-                                        <span id="endpoint_label">/api/users</span> - Data endpoint
-                                    </label>
+                                <!-- Memory Configuration -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="memory_request" class="form-label">
+                                            <i class="fas fa-memory me-1"></i>
+                                            Memory Request
+                                        </label>
+                                        <select class="form-select" id="memory_request" name="memory_request">
+                                            <option value="64Mi">64Mi (64 MB)</option>
+                                            <option value="128Mi" selected>128Mi (128 MB)</option>
+                                            <option value="256Mi">256Mi (256 MB)</option>
+                                            <option value="512Mi">512Mi (512 MB)</option>
+                                            <option value="1Gi">1Gi (1 GB)</option>
+                                            <option value="2Gi">2Gi (2 GB)</option>
+                                        </select>
+                                        <small class="text-muted">Memory request for each pod</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="memory_limit" class="form-label">
+                                            <i class="fas fa-memory me-1"></i>
+                                            Memory Limit
+                                        </label>
+                                        <select class="form-select" id="memory_limit" name="memory_limit">
+                                            <option value="128Mi">128Mi (128 MB)</option>
+                                            <option value="256Mi" selected>256Mi (256 MB)</option>
+                                            <option value="512Mi">512Mi (512 MB)</option>
+                                            <option value="1Gi">1Gi (1 GB)</option>
+                                            <option value="2Gi">2Gi (2 GB)</option>
+                                            <option value="4Gi">4Gi (4 GB)</option>
+                                        </select>
+                                        <small class="text-muted">Memory limit for each pod</small>
+                                    </div>
                                 </div>
                             </div>
 
@@ -278,21 +334,23 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Update endpoint label based on data type
-        document.getElementById('mock_data_type').addEventListener('change', function() {
-            const dataType = this.value;
-            const endpointLabel = document.getElementById('endpoint_label');
-            const endpointCheckbox = document.getElementById('endpoint_data');
+        // Add smart defaults for resource selection
+        document.getElementById('cpu_request').addEventListener('change', function() {
+            const cpuRequest = this.value;
+            const cpuLimit = document.getElementById('cpu_limit');
             
-            if (dataType === 'users') {
-                endpointLabel.textContent = '/api/users';
-                endpointCheckbox.value = '/api/users';
-            } else if (dataType === 'products') {
-                endpointLabel.textContent = '/api/products';
-                endpointCheckbox.value = '/api/products';
-            } else if (dataType === 'orders') {
-                endpointLabel.textContent = '/api/orders';
-                endpointCheckbox.value = '/api/orders';
+            // Auto-adjust CPU limit to be at least 2x the request
+            const requestValue = parseInt(cpuRequest.replace('m', ''));
+            const minLimitValue = requestValue * 2;
+            
+            // Find the first option that's >= minLimitValue
+            const options = cpuLimit.querySelectorAll('option');
+            for (let option of options) {
+                const optionValue = parseInt(option.value.replace('m', ''));
+                if (optionValue >= minLimitValue) {
+                    cpuLimit.value = option.value;
+                    break;
+                }
             }
         });
 
