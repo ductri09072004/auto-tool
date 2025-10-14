@@ -98,7 +98,9 @@ def create_service():
         # Get form data
         service_name = request.form.get('service_name')
         description = request.form.get('description')
-        port = request.form.get('port', '5001')
+        port = request.form.get('port', '')
+        if not port:
+            return jsonify({'error': 'Port is required'}), 400
         repo_url = request.form.get('repo_url', '').strip()
         repo_b_url = request.form.get('repo_b_url', '').strip()
         namespace = request.form.get('namespace', '').strip()
@@ -200,9 +202,11 @@ def generate_repository(service_data, repo_url):
 
         # Replace placeholders in all files
         namespace = service_name  # Use service name as namespace
+        port = service_data['port']
         repl = {
             '{SERVICE_NAME}': service_name,
             '{NAMESPACE}': namespace,
+            '{PORT}': port,
         }
         
         for root, _, files in os.walk(repo_dir):
@@ -295,9 +299,9 @@ def generate_app_py(repo_dir, service_data, namespace):
             f.write(content)
     else:
         # Fallback to old method if template not found
-        mock_data_type = service_data['mock_data_type']
-        data_count = service_data['data_count']
-        endpoints = service_data['endpoints']
+        mock_data_type = service_data.get('mock_data_type', 'users')
+        data_count = service_data.get('data_count', 10)
+        endpoints = service_data.get('endpoints', ['/api/health', '/api/users'])
     
     # Generate mock data based on type
     if mock_data_type == 'users':
@@ -510,7 +514,9 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
     """Prepare Repo B manifests from template and push to Repo B URL."""
     try:
         service_name = service_data['service_name']
-        container_port = service_data.get('port', '5001')
+        container_port = service_data.get('port')
+        if not container_port:
+            return {'success': False, 'error': 'Port is required in service_data'}
         service_port = '80'
         health_path = '/api/health'
         domain = 'example.local'
@@ -622,22 +628,10 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         grafana_dir = os.path.join(service_dir, 'grafana')
         os.makedirs(grafana_dir, exist_ok=True)
         
-        # Determine service port: prefer provided port, fallback to version-based rule
-        try:
-            provided_port = int(service_data.get('port')) if service_data.get('port') else None
-        except Exception:
-            provided_port = None
-        if provided_port:
-            service_port = provided_port
-        else:
-            if '-v' in service_name:
-                try:
-                    version_num = int(service_name.split('-v')[-1])
-                    service_port = 5000 + version_num
-                except:
-                    service_port = 5001
-            else:
-                service_port = 5001
+        # Use provided port from service_data
+        service_port = int(service_data.get('port'))
+        if not service_port:
+            return {'success': False, 'error': 'Port is required in service_data'}
         
         # Create dashboard.json
         dashboard_content = f"""{{
@@ -816,22 +810,10 @@ Write-Host "Dashboard import completed for {service_name}!" -ForegroundColor Gre
         
         # Auto-configure Prometheus and import Grafana dashboard
         try:
-            # Calculate port for service: prefer provided port, else 5000 + version
-            try:
-                provided_port = int(service_data.get('port')) if service_data.get('port') else None
-            except Exception:
-                provided_port = None
-            if provided_port:
-                service_port = provided_port
-            else:
-                if '-v' in service_name:
-                    try:
-                        version_num = int(service_name.split('-v')[-1])
-                        service_port = 5000 + version_num
-                    except:
-                        service_port = 5001
-                else:
-                    service_port = 5001
+            # Use provided port from service_data
+            service_port = int(service_data.get('port'))
+            if not service_port:
+                return {'success': False, 'error': 'Port is required in service_data'}
             
             # Add Prometheus scrape job
             prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
