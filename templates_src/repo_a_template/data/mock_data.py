@@ -32,24 +32,6 @@ def get_user_profile():
         "active_sessions": 3
     }
 
-def get_health_status():
-    """Trả về trạng thái sức khỏe hệ thống giả"""
-    return {
-        "health_status": "operational",
-        "service_name": "Demo FISS Service",
-        "system_metrics": {
-            "cpu_usage": "15%",
-            "memory_usage": "68%",
-            "disk_usage": "42%"
-        },
-        "platform": {
-            "os": "Windows",
-            "architecture": "64bit",
-            "python_version": "3.9.0"
-        },
-        "response_time": "12ms"
-    }
-
 def get_products_data():
     """Trả về dữ liệu sản phẩm giả"""
     return {
