@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dev Portal - Service Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            --danger-gradient: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            --info-gradient: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            --dark-gradient: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+        }
+
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+        }
+
+        .service-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            background: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .service-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: #28a745;
+            transition: all 0.3s ease;
+        }
+
+        .service-card.degraded::before {
+            background: #dc3545;
+        }
+
+        .service-card.unknown::before {
+            background: #ffc107;
+        }
+
+        .service-card.not_deployed::before {
+            background: #6c757d;
+        }
+
+        .service-card:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+
+        .service-card:hover::before {
+            height: 6px;
+        }
+
+        .status-badge {
+            font-size: 0.75em;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .service-actions {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .service-card:hover .service-actions {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .service-actions .btn {
+            border-radius: 12px;
+            padding: 8px 12px;
+            margin: 0 2px;
+            transition: all 0.2s ease;
+            border: none;
+            font-weight: 500;
+        }
+
+        .service-actions .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .stats-card {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .stats-card:nth-child(1) {
+            background: #667eea;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+        }
+
+        .stats-card:nth-child(2) {
+            background: #4facfe;
+            box-shadow: 0 8px 32px rgba(79, 172, 254, 0.3);
+        }
+
+        .stats-card:nth-child(3) {
+            background: #fa709a;
+            box-shadow: 0 8px 32px rgba(250, 112, 154, 0.3);
+        }
+
+        .stats-card:nth-child(4) {
+            background: #ff6b6b;
+            box-shadow: 0 8px 32px rgba(255, 107, 107, 0.3);
+        }
+
+        .stats-card:hover {
+            transform: translateY(-4px);
+        }
+
+        .stats-card:nth-child(1):hover {
+            box-shadow: 0 12px 40px rgba(102, 126, 234, 0.4);
+        }
+
+        .stats-card:nth-child(2):hover {
+            box-shadow: 0 12px 40px rgba(79, 172, 254, 0.4);
+        }
+
+        .stats-card:nth-child(3):hover {
+            box-shadow: 0 12px 40px rgba(250, 112, 154, 0.4);
+        }
+
+        .stats-card:nth-child(4):hover {
+            box-shadow: 0 12px 40px rgba(255, 107, 107, 0.4);
+        }
+
+        .stats-card h3 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            color: #ffffff !important;
+        }
+
+        .stats-card p {
+            color: rgba(255, 255, 255, 0.9) !important;
+            font-weight: 500;
+        }
+
+        .stats-icon {
+            font-size: 2.5rem;
+            color: rgba(255, 255, 255, 0.8);
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+        }
+
+        .stats-card:hover .stats-icon {
+            transform: scale(1.1);
+            color: rgba(255, 255, 255, 1);
+        }
+
+        .navbar {
+            background: rgba(255, 255, 255, 0.95) !important;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.5rem;
+        }
+
+        .navbar .nav-link {
+            color: rgba(255, 255, 255, 0.8) !important;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }
+
+        .navbar .nav-link:hover {
+            color: white !important;
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-1px);
+        }
+
+        /* Breadcrumb Styling */
+        .breadcrumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 12px 20px;
+            margin-bottom: 0;
+            backdrop-filter: blur(10px);
+        }
+
+        .breadcrumb-item a {
+            color: #667eea;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .breadcrumb-item a:hover {
+            color: #764ba2;
+            transform: translateX(2px);
+        }
+
+        .breadcrumb-item.active {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        .breadcrumb-item + .breadcrumb-item::before {
+            content: "›";
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        /* Floating Action Button */
+        .fab-container {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 1000;
+        }
+
+        .fab {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 60px;
+            height: 60px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            text-decoration: none;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 24px;
+        }
+
+        .fab:hover {
+            background: #5a6fd8;
+            transform: translateY(-4px) scale(1.1);
+            box-shadow: 0 12px 40px rgba(102, 126, 234, 0.4);
+            color: white;
+            text-decoration: none;
+        }
+
+        .fab:active {
+            transform: translateY(-2px) scale(1.05);
+        }
+
+        /* Responsive FAB */
+        @media (max-width: 768px) {
+            .fab-container {
+                bottom: 20px;
+                right: 20px;
+            }
+            
+            .fab {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+            }
+        }
+
+        /* Custom Delete Confirmation Modal */
+        #deleteConfirmationModal .modal-content {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        #deleteConfirmationModal .modal-header {
+            background: #dc3545;
+            color: white;
+            padding: 20px 24px;
+        }
+
+        #deleteConfirmationModal .modal-title {
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+
+        #deleteConfirmationModal .modal-body {
+            padding: 32px 24px;
+        }
+
+        #deleteConfirmationModal .alert-warning {
+            background: #ffc107;
+            border: none;
+            border-radius: 12px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        #deleteConfirmationModal .btn-danger {
+            background: #dc3545;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        #deleteConfirmationModal .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(220, 53, 69, 0.3);
+        }
+
+        #deleteConfirmationModal .btn-secondary {
+            background: #6c757d;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        #deleteConfirmationModal .btn-secondary:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+
+        #deleteConfirmationModal .btn-close {
+            filter: brightness(0) invert(1);
+        }
+
+        /* Animation for modal */
+        #deleteConfirmationModal .modal-dialog {
+            transform: scale(0.8);
+            transition: transform 0.3s ease;
+        }
+
+        #deleteConfirmationModal.show .modal-dialog {
+            transform: scale(1);
+        }
+
+        /* Custom Restart Confirmation Modal */
+        #restartConfirmationModal .modal-content {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        #restartConfirmationModal .modal-header {
+            background: #ffc107;
+            color: #2c3e50;
+            padding: 20px 24px;
+        }
+
+        #restartConfirmationModal .modal-title {
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+
+        #restartConfirmationModal .modal-body {
+            padding: 32px 24px;
+        }
+
+        #restartConfirmationModal .alert-info {
+            background: #17a2b8;
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+        }
+
+        #restartConfirmationModal .btn-warning {
+            background: #ffc107;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            color: #2c3e50;
+            transition: all 0.3s ease;
+        }
+
+        #restartConfirmationModal .btn-warning:hover {
+            background: #e0a800;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255, 193, 7, 0.3);
+            color: #2c3e50;
+        }
+
+        #restartConfirmationModal .btn-secondary {
+            background: #6c757d;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        #restartConfirmationModal .btn-secondary:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+
+        #restartConfirmationModal .btn-close {
+            filter: brightness(0) invert(1);
+        }
+
+        /* Animation for restart modal */
+        #restartConfirmationModal .modal-dialog {
+            transform: scale(0.8);
+            transition: transform 0.3s ease;
+        }
+
+        #restartConfirmationModal.show .modal-dialog {
+            transform: scale(1);
+        }
+
+        .btn-success {
+            background: #28a745;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(40, 167, 69, 0.3);
+        }
+
+        .card {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+
+        .card-header {
+            background: rgba(255, 255, 255, 0.8);
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            border-radius: 20px 20px 0 0 !important;
+        }
+
+        .btn-group .btn {
+            border-radius: 12px;
+            margin: 0 2px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .btn-group .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-outline-primary {
+            border: 2px solid #667eea;
+            color: #667eea;
+        }
+
+        .btn-outline-primary:hover {
+            background: #667eea;
+            border-color: #667eea;
+        }
+
+        .btn-outline-success {
+            border: 2px solid #4facfe;
+            color: #4facfe;
+        }
+
+        .btn-outline-success:hover {
+            background: #4facfe;
+            border-color: #4facfe;
+        }
+
+        .btn-outline-warning {
+            border: 2px solid #fa709a;
+            color: #fa709a;
+        }
+
+        .btn-outline-warning:hover {
+            background: #fa709a;
+            border-color: #fa709a;
+        }
+
+        .btn-outline-secondary {
+            border: 2px solid #6c757d;
+            color: #6c757d;
+        }
+
+        .btn-outline-secondary:hover {
+            background: #6c757d;
+            border-color: #6c757d;
+        }
+
+        .btn-outline-info {
+            border: 2px solid #a8edea;
+            color: #a8edea;
+        }
+
+        .btn-outline-info:hover {
+            background: #a8edea;
+            border-color: #a8edea;
+            color: #2c3e50;
+        }
+
+        .modal-content {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            border-radius: 20px 20px 0 0;
+        }
+
+        .form-control, .form-select {
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 12px 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-control:focus, .form-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+        .badge {
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-weight: 600;
+        }
+
+        .bg-success {
+            background: #28a745 !important;
+        }
+
+        .bg-danger {
+            background: #dc3545 !important;
+        }
+
+        .bg-warning {
+            background: #ffc107 !important;
+            color: #2c3e50 !important;
+        }
+
+        .bg-secondary {
+            background: #6c757d !important;
+        }
+
+        /* Loading animation */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Pulse animation for status */
+        .service-card.healthy::before {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        /* Fade in animation for cards */
+        .service-card {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Hover effects for action buttons */
+        .service-actions .btn-outline-primary:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .service-actions .btn-outline-warning:hover {
+            background: #ffc107;
+            color: #2c3e50;
+        }
+
+        .service-actions .btn-outline-danger:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        /* Action Cards */
+        .action-card {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            border-radius: 16px;
+            background: white;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .action-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+
+        .action-card.danger:hover {
+            border-color: #ff6b6b;
+            box-shadow: 0 12px 40px rgba(255, 107, 107, 0.2);
+        }
+
+        .action-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 20px;
+            font-size: 24px;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .action-card:hover .action-icon {
+            transform: scale(1.1);
+        }
+
+        .action-content h6 {
+            margin: 0 0 8px 0;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .action-content p {
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* Enhanced Modal Styling */
+        .modal-content {
+            border: none;
+            border-radius: 24px;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 24px;
+        }
+
+        .modal-title {
+            font-weight: 700;
+            font-size: 1.5rem;
+        }
+
+        .btn-close {
+            filter: brightness(0) invert(1);
+        }
+
+        /* Loading States */
+        .btn.loading {
+            position: relative;
+            color: transparent !important;
+        }
+
+        .btn.loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+
+        .toast {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+        }
+
+        /* Enhanced Service Cards */
+        .service-card .card-body {
+            padding: 24px;
+        }
+
+        .service-card h6 {
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .service-card .text-muted {
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .service-card .row.text-center {
+            margin-top: 16px;
+        }
+
+        .service-card .row.text-center small {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .service-card .row.text-center strong {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+
+        /* Status Indicators */
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.healthy {
+            background: #4facfe;
+            box-shadow: 0 0 10px rgba(79, 172, 254, 0.5);
+        }
+
+        .status-indicator.degraded {
+            background: #ff6b6b;
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+        }
+
+        .status-indicator.unknown {
+            background: #fa709a;
+            box-shadow: 0 0 10px rgba(250, 112, 154, 0.5);
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .service-card {
+                margin-bottom: 1rem;
+            }
+            
+            .stats-card h3 {
+                font-size: 2rem;
+            }
+            
+            .btn-group {
+                flex-wrap: wrap;
+            }
+            
+            .btn-group .btn {
+                margin-bottom: 0.5rem;
+            }
+
+            .action-card {
+                padding: 16px;
+            }
+
+            .action-icon {
+                width: 50px;
+                height: 50px;
+                margin-right: 16px;
+                font-size: 20px;
+            }
+
+            .modal-dialog {
+                margin: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-rocket me-2"></i>Dev Portal
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link me-3" href="/">
+                    <i class="fas fa-home me-2"></i>Back to Portal
+                </a>
+                <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#createServiceModal">
+                    <i class="fas fa-plus me-2"></i>Create Service
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item">
+                    <a href="/" class="text-decoration-none">
+                        <i class="fas fa-home me-1"></i>Dev Portal
+                    </a>
+                </li>
+                <li class="breadcrumb-item active" aria-current="page">
+                    <i class="fas fa-tachometer-alt me-1"></i>Service Dashboard
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon mb-3">
+                            <i class="fas fa-server"></i>
+                        </div>
+                        <h3 id="totalServices">0</h3>
+                        <p class="mb-0">Total Services</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon mb-3">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <h3 id="activeServices">0</h3>
+                        <p class="mb-0">Active Services</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon mb-3">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <h3 id="degradedServices">0</h3>
+                        <p class="mb-0">Degraded Services</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon mb-3">
+                            <i class="fas fa-archive"></i>
+                        </div>
+                        <h3 id="archivedServices">0</h3>
+                        <p class="mb-0">Archived Services</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Service List -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-list me-2"></i>Services
+                        </h5>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-outline-primary btn-sm" onclick="filterServices('all')">All</button>
+                            <button class="btn btn-outline-success btn-sm" onclick="filterServices('active')">Active</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="filterServices('degraded')">Degraded</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterServices('archived')">Archived</button>
+                            <button class="btn btn-outline-info btn-sm" onclick="syncServices()">
+                                <i class="fas fa-sync me-1"></i>Sync from Repo B
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="servicesList" class="row">
+                            <!-- Services will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Service Modal -->
+    <div class="modal fade" id="createServiceModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Service</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createServiceForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Service Name</label>
+                                    <input type="text" class="form-control" name="service_name" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Port</label>
+                                    <input type="number" class="form-control" name="port" value="5001" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" name="description" rows="3"></textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Repository URL</label>
+                                    <input type="url" class="form-control" name="repo_url" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Namespace</label>
+                                    <input type="text" class="form-control" name="namespace">
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" onclick="createService()">Create Service</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service Actions Modal -->
+    <div class="modal fade" id="serviceActionsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-cogs me-2"></i>Service Actions
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <!-- View Details -->
+                        <div class="col-md-6">
+                            <div class="action-card" onclick="viewServiceDetails()">
+                                <div class="action-icon bg-info">
+                                    <i class="fas fa-eye"></i>
+                                </div>
+                                <div class="action-content">
+                                    <h6>View Details</h6>
+                                    <p class="text-muted small">Inspect service configuration and status</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Restart Service -->
+                        <div class="col-md-6">
+                            <div class="action-card" onclick="restartService()">
+                                <div class="action-icon bg-warning">
+                                    <i class="fas fa-redo"></i>
+                                </div>
+                                <div class="action-content">
+                                    <h6>Restart Service</h6>
+                                    <p class="text-muted small">Restart the service deployment</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- View Logs -->
+                        <div class="col-md-6">
+                            <div class="action-card" onclick="viewLogs()">
+                                <div class="action-icon bg-primary">
+                                    <i class="fas fa-file-alt"></i>
+                                </div>
+                                <div class="action-content">
+                                    <h6>View Logs</h6>
+                                    <p class="text-muted small">Check service logs and events</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Archive Service -->
+                        <div class="col-md-6">
+                            <div class="action-card" onclick="archiveService()">
+                                <div class="action-icon bg-secondary">
+                                    <i class="fas fa-archive"></i>
+                                </div>
+                                <div class="action-content">
+                                    <h6>Archive Service</h6>
+                                    <p class="text-muted small">Move service to archive</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Delete Service -->
+                        <div class="col-12">
+                            <div class="action-card danger" onclick="deleteServiceFromModal()">
+                                <div class="action-icon bg-danger">
+                                    <i class="fas fa-trash"></i>
+                                </div>
+                                <div class="action-content">
+                                    <h6>Delete Service</h6>
+                                    <p class="text-muted small">Permanently remove service and all resources</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentServices = [];
+        let selectedService = null;
+
+        // Load services on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadServices();
+        });
+
+        // Load services from API
+        async function loadServices() {
+            try {
+                const response = await fetch('/api/services');
+                const data = await response.json();
+                currentServices = data.services || [];
+                renderServices();
+                updateStats();
+            } catch (error) {
+                console.error('Error loading services:', error);
+            }
+        }
+
+        // Render services list
+        function renderServices(services = currentServices) {
+            const container = document.getElementById('servicesList');
+            container.innerHTML = '';
+
+            services.forEach(service => {
+                const serviceCard = createServiceCard(service);
+                container.appendChild(serviceCard);
+            });
+        }
+
+        // Create service card
+        function createServiceCard(service) {
+            const col = document.createElement('div');
+            col.className = 'col-md-6 col-lg-4 mb-3';
+
+            const statusClass = service.health_status === 'Healthy' ? '' : 
+                              service.health_status === 'Degraded' ? 'degraded' : 'unknown';
+
+            col.innerHTML = `
+                <div class="card service-card ${statusClass}" onclick="selectService('${service.name}')">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">${service.name}</h6>
+                            <span class="badge bg-${getStatusColor(service.health_status)} status-badge">
+                                ${service.health_status}
+                            </span>
+                        </div>
+                        <p class="card-text text-muted small mb-2">${service.description || 'No description'}</p>
+                        <div class="row text-center">
+                            <div class="col-3">
+                                <small class="text-muted">Port</small><br>
+                                <strong>${service.port}</strong>
+                            </div>
+                            <div class="col-3">
+                                <small class="text-muted">Namespace</small><br>
+                                <strong>${service.namespace}</strong>
+                            </div>
+                            <div class="col-3">
+                                <small class="text-muted">Replicas</small><br>
+                                <strong>${service.replicas || 'N/A'}</strong>
+                            </div>
+                            <div class="col-3">
+                                <small class="text-muted">Source</small><br>
+                                <strong>${service.repo_path ? 'Repo B' : 'Database'}</strong>
+                            </div>
+                        </div>
+                        <div class="service-actions mt-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); viewService('${service.name}')">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); restartService('${service.name}')">
+                                <i class="fas fa-redo"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteService('${service.name}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            return col;
+        }
+
+        // Get status color
+        function getStatusColor(status) {
+            switch(status) {
+                case 'Healthy': return 'success';
+                case 'Degraded': return 'danger';
+                case 'Progressing': return 'warning';
+                default: return 'secondary';
+            }
+        }
+
+        // Update statistics with animation
+        function updateStats() {
+            const total = currentServices.length;
+            const active = currentServices.filter(s => s.health_status === 'Healthy').length;
+            const degraded = currentServices.filter(s => s.health_status === 'Degraded').length;
+            const archived = currentServices.filter(s => s.status === 'archived').length;
+
+            animateNumber('totalServices', total);
+            animateNumber('activeServices', active);
+            animateNumber('degradedServices', degraded);
+            animateNumber('archivedServices', archived);
+        }
+
+        // Animate number counting
+        function animateNumber(elementId, targetNumber) {
+            const element = document.getElementById(elementId);
+            const startNumber = parseInt(element.textContent) || 0;
+            const duration = 1000; // 1 second
+            const startTime = performance.now();
+
+            function updateNumber(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                // Easing function for smooth animation
+                const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+                const currentNumber = Math.round(startNumber + (targetNumber - startNumber) * easeOutCubic);
+                
+                element.textContent = currentNumber;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(updateNumber);
+                }
+            }
+
+            requestAnimationFrame(updateNumber);
+        }
+
+        // Filter services
+        function filterServices(filter) {
+            let filtered = currentServices;
+            if (filter !== 'all') {
+                filtered = currentServices.filter(service => {
+                    if (filter === 'active') return service.health_status === 'Healthy';
+                    if (filter === 'degraded') return service.health_status === 'Degraded';
+                    if (filter === 'archived') return service.status === 'archived';
+                    return true;
+                });
+            }
+            renderServices(filtered);
+        }
+
+        // Select service
+        function selectService(serviceName) {
+            selectedService = serviceName;
+            const modal = new bootstrap.Modal(document.getElementById('serviceActionsModal'));
+            modal.show();
+        }
+
+        // Create service
+        async function createService() {
+            const form = document.getElementById('createServiceForm');
+            const formData = new FormData(form);
+            const button = document.querySelector('#createServiceModal .btn-success');
+            const originalText = button.innerHTML;
+            
+            try {
+                button.innerHTML = '<span class="loading"></span> Creating...';
+                button.disabled = true;
+                
+                const response = await fetch('/create_service', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('createServiceModal'));
+                    modal.hide();
+                    form.reset();
+                    showToast(`Service "${result.service_name}" created successfully!`, 'success');
+                    loadServices();
+                } else {
+                    const error = await response.json();
+                    showToast(`Error: ${error.error}`, 'danger');
+                }
+            } catch (error) {
+                showToast(`Error creating service: ${error.message}`, 'danger');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        // Toast notification system
+        function showToast(message, type = 'success') {
+            const toastContainer = document.getElementById('toast-container') || createToastContainer();
+            
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i>
+                        ${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+            
+            // Remove toast element after it's hidden
+            toast.addEventListener('hidden.bs.toast', () => {
+                toast.remove();
+            });
+        }
+
+        function createToastContainer() {
+            const container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'toast-container position-fixed top-0 end-0 p-3';
+            container.style.zIndex = '9999';
+            document.body.appendChild(container);
+            return container;
+        }
+
+        // Service actions with loading states
+        function viewService(serviceName) {
+            window.open(`/api/services/${serviceName}/details`, '_blank');
+        }
+
+        async function restartService(serviceName) {
+            showRestartConfirmation(serviceName);
+        }
+
+        function showRestartConfirmation(serviceName) {
+            // Create custom restart confirmation modal
+            const modalHtml = `
+                <div class="modal fade" id="restartConfirmationModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header border-0">
+                                <h5 class="modal-title text-warning">
+                                    <i class="fas fa-redo me-2"></i>
+                                    Restart Service
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body text-center py-4">
+                                <div class="mb-4">
+                                    <i class="fas fa-sync-alt text-warning" style="font-size: 3rem;"></i>
+                                </div>
+                                <h6 class="mb-3">Are you sure you want to restart this service?</h6>
+                                <div class="alert alert-info">
+                                    <strong>Service:</strong> ${serviceName}
+                                </div>
+                                <p class="text-muted mb-0">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    This will restart the service deployment. The service may be temporarily unavailable during restart.
+                                </p>
+                            </div>
+                            <div class="modal-footer border-0 justify-content-center">
+                                <button type="button" class="btn btn-secondary me-3" data-bs-dismiss="modal">
+                                    <i class="fas fa-times me-2"></i>Cancel
+                                </button>
+                                <button type="button" class="btn btn-warning" onclick="confirmRestart('${serviceName}')">
+                                    <i class="fas fa-redo me-2"></i>Restart Service
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('restartConfirmationModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // Add modal to body
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('restartConfirmationModal'));
+            modal.show();
+            
+            // Remove modal from DOM when hidden
+            document.getElementById('restartConfirmationModal').addEventListener('hidden.bs.modal', function() {
+                this.remove();
+            });
+        }
+
+        async function confirmRestart(serviceName) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('restartConfirmationModal'));
+            modal.hide();
+            
+            const button = event.target;
+            const originalText = button.innerHTML;
+            
+            try {
+                button.innerHTML = '<span class="loading"></span> Restarting...';
+                button.disabled = true;
+                
+                const response = await fetch(`/api/services/${serviceName}/restart`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    showToast(`${serviceName} restarted successfully!`, 'success');
+                    loadServices();
+                } else {
+                    const error = await response.json();
+                    showToast(`Error restarting service: ${error.error}`, 'danger');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'danger');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        async function deleteService(serviceName) {
+            showDeleteConfirmation(serviceName);
+        }
+
+        function showDeleteConfirmation(serviceName) {
+            // Create custom confirmation modal
+            const modalHtml = `
+                <div class="modal fade" id="deleteConfirmationModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header border-0">
+                                <h5 class="modal-title text-danger">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    Delete Service
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body text-center py-4">
+                                <div class="mb-4">
+                                    <i class="fas fa-trash-alt text-danger" style="font-size: 3rem;"></i>
+                                </div>
+                                <h6 class="mb-3">Are you sure you want to delete this service?</h6>
+                                <div class="alert alert-warning">
+                                    <strong>Service:</strong> ${serviceName}
+                                </div>
+                                <p class="text-muted mb-0">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    This action will permanently delete the service and all its resources. 
+                                    This cannot be undone.
+                                </p>
+                            </div>
+                            <div class="modal-footer border-0 justify-content-center">
+                                <button type="button" class="btn btn-secondary me-3" data-bs-dismiss="modal">
+                                    <i class="fas fa-times me-2"></i>Cancel
+                                </button>
+                                <button type="button" class="btn btn-danger" onclick="confirmDelete('${serviceName}')">
+                                    <i class="fas fa-trash me-2"></i>Delete Service
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('deleteConfirmationModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // Add modal to body
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('deleteConfirmationModal'));
+            modal.show();
+            
+            // Remove modal from DOM when hidden
+            document.getElementById('deleteConfirmationModal').addEventListener('hidden.bs.modal', function() {
+                this.remove();
+            });
+        }
+
+        async function confirmDelete(serviceName) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('deleteConfirmationModal'));
+            modal.hide();
+            
+            const button = event.target;
+            const originalText = button.innerHTML;
+            
+            try {
+                button.innerHTML = '<span class="loading"></span> Deleting...';
+                button.disabled = true;
+                
+                const response = await fetch(`/api/services/${serviceName}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showToast(`${serviceName} deleted successfully!`, 'success');
+                    loadServices();
+                } else {
+                    const error = await response.json();
+                    showToast(`Error deleting service: ${error.error}`, 'danger');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'danger');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        // Modal action functions
+        function viewServiceDetails() {
+            if (selectedService) {
+                viewService(selectedService);
+                bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        function restartService() {
+            if (selectedService) {
+                restartService(selectedService);
+                bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        function viewLogs() {
+            if (selectedService) {
+                window.open(`/api/services/${selectedService}/logs`, '_blank');
+                bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        function archiveService() {
+            if (selectedService) {
+                showToast('Archive functionality coming soon!', 'info');
+                bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        function deleteServiceFromModal() {
+            if (selectedService) {
+                deleteService(selectedService);
+                bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        // Sync services from Repo B
+        async function syncServices() {
+            if (confirm('Sync services from Repo B folder structure?')) {
+                const button = event.target;
+                const originalText = button.innerHTML;
+                
+                try {
+                    button.innerHTML = '<span class="loading"></span> Syncing...';
+                    button.disabled = true;
+                    
+                    const response = await fetch('/api/services/sync', {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        const result = await response.json();
+                        showToast(`Synced ${result.synced_count} services from Repo B!`, 'success');
+                        loadServices(); // Reload the list
+                    } else {
+                        const error = await response.json();
+                        showToast(`Error: ${error.error}`, 'danger');
+                    }
+                } catch (error) {
+                    showToast(`Error syncing services: ${error.message}`, 'danger');
+                } finally {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            }
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadServices, 30000);
+    </script>
+
+    <!-- Floating Action Button -->
+    <div class="fab-container">
+        <a href="/" class="fab" title="Back to Dev Portal">
+            <i class="fas fa-home"></i>
+        </a>
+    </div>
+</body>
+</html>

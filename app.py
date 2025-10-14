@@ -8,11 +8,20 @@ from urllib.parse import urlparse
 from datetime import datetime
 import tempfile
 import time
+from service_manager import ServiceManager
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN
+try:
+    # PyNaCl is required to encrypt secrets for GitHub API
+    from nacl import encoding, public
+except Exception:
+    public = None
 
 app = Flask(__name__)
 
-# GitHub configuration
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', 'your_github_token_here')
+# Initialize Service Manager
+service_manager = ServiceManager()
+
+# GitHub configuration comes from config.py (GITHUB_TOKEN)
 
 # Monitoring configuration
 PROMETHEUS_URL = "http://localhost:9090"
@@ -21,6 +30,65 @@ GRAFANA_USER = "admin"
 GRAFANA_PASS = "admin123"
 GITHUB_ORG = os.getenv('GITHUB_ORG', 'your_organization')
 DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri09072004/demo_fiss1_B')
+
+def _encrypt_secret(public_key: str, secret_value: str) -> str:
+    """Encrypt a secret using GitHub Actions public key (libsodium sealed box)."""
+    if public is None:
+        raise RuntimeError("PyNaCl is required to encrypt GitHub secrets. Please install pynacl.")
+    pk = public.PublicKey(public_key.encode("utf-8"), encoding.Base64Encoder())
+    sealed_box = public.SealedBox(pk)
+    encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
+    return encoding.Base64Encoder().encode(encrypted).decode("utf-8")
+
+def ensure_repo_secrets(repo_url: str) -> bool:
+    """Ensure GHCR_TOKEN and MANIFESTS_REPO_TOKEN exist in repo secrets."""
+    try:
+        parsed = urlparse(repo_url)
+        path = parsed.path.lstrip('/')
+        if path.endswith('.git'):
+            path = path[:-4]
+        parts = path.split('/')
+        if len(parts) < 2:
+            return False
+        owner, repo_name = parts[0], parts[1]
+        base = f"https://api.github.com/repos/{owner}/{repo_name}/actions/secrets"
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github+json'
+        }
+
+        # Fetch public key
+        pk_resp = requests.get(f"{base}/public-key", headers=headers)
+        if pk_resp.status_code != 200:
+            print(f"Failed to get public key: {pk_resp.status_code} {pk_resp.text}")
+            return False
+        pk_json = pk_resp.json()
+        repo_public_key = pk_json.get('key')
+        key_id = pk_json.get('key_id')
+        if not repo_public_key or not key_id:
+            return False
+
+        # Encrypt and upsert secrets
+        updates = {
+            'GHCR_TOKEN': GHCR_TOKEN,
+            'MANIFESTS_REPO_TOKEN': MANIFESTS_REPO_TOKEN
+        }
+        for name, value in updates.items():
+            if not value:
+                continue
+            encrypted_value = _encrypt_secret(repo_public_key, value)
+            put_resp = requests.put(
+                f"{base}/{name}",
+                headers={**headers, 'Content-Type': 'application/json'},
+                json={'encrypted_value': encrypted_value, 'key_id': key_id}
+            )
+            if put_resp.status_code not in [201, 204]:
+                print(f"Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
+                return False
+        return True
+    except Exception as e:
+        print(f"ensure_repo_secrets error: {e}")
+        return False
 
 def add_prometheus_scrape_job(service_name, service_port):
     """Add Prometheus scrape job for new service"""
@@ -92,6 +160,292 @@ def import_grafana_dashboard(service_name, grafana_dir):
 def index():
     return render_template('index.html')
 
+@app.route('/dashboard')
+def dashboard():
+    return render_template('service_dashboard.html')
+
+# Service Management API Endpoints
+@app.route('/api/services', methods=['GET'])
+def get_services():
+    """Get list of all services from Repo B folder structure"""
+    try:
+        services = []
+        repo_b_path = "E:\\Study\\demo_fiss1_B\\services"
+        
+        # Check if services directory exists
+        if not os.path.exists(repo_b_path):
+            return jsonify({'services': []})
+        
+        # Get all service directories
+        service_dirs = [d for d in os.listdir(repo_b_path) 
+                       if os.path.isdir(os.path.join(repo_b_path, d)) and d.startswith('demo-v')]
+        
+        for service_name in service_dirs:
+            service_path = os.path.join(repo_b_path, service_name)
+            k8s_path = os.path.join(service_path, 'k8s')
+            
+            # Skip if k8s directory doesn't exist
+            if not os.path.exists(k8s_path):
+                continue
+            
+            # Read service information from files
+            service_info = read_service_info(service_name, k8s_path)
+            
+            # Get Kubernetes status if available
+            try:
+                # Check if namespace exists
+                result = subprocess.run(['kubectl', 'get', 'namespace', service_name], 
+                                      capture_output=True, text=True, check=True)
+                
+                # Get deployment status
+                deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, 
+                                              '-n', service_name, '-o', 'json'], 
+                                              capture_output=True, text=True, check=True)
+                deployment = json.loads(deploy_result.stdout)
+                
+                # Get ArgoCD application status
+                try:
+                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, 
+                                                   '-n', 'argocd', '-o', 'json'], 
+                                                   capture_output=True, text=True, check=True)
+                    argocd_app = json.loads(argocd_result.stdout)
+                    health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
+                    sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
+                except subprocess.CalledProcessError:
+                    health_status = 'Unknown'
+                    sync_status = 'Unknown'
+                
+                replicas = deployment['spec'].get('replicas', 1)
+                status = 'active' if health_status == 'Healthy' else 'degraded'
+                
+            except subprocess.CalledProcessError:
+                # Service not deployed in Kubernetes
+                health_status = 'Not Deployed'
+                sync_status = 'Unknown'
+                replicas = 0
+                status = 'not_deployed'
+            
+            services.append({
+                'name': service_name,
+                'namespace': service_name,
+                'port': service_info.get('port', 5001),
+                'replicas': replicas,
+                'health_status': health_status,
+                'sync_status': sync_status,
+                'description': service_info.get('description', f'Demo service {service_name}'),
+                'created_at': service_info.get('created_at', 'Unknown'),
+                'status': status,
+                'repo_path': service_path,
+                'k8s_path': k8s_path
+            })
+        
+        # Sort by service name
+        services.sort(key=lambda x: x['name'])
+        
+        return jsonify({'services': services})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def read_service_info(service_name, k8s_path):
+    """Read service information from k8s files"""
+    service_info = {
+        'port': 5001,
+        'description': f'Demo service {service_name}',
+        'created_at': 'Unknown'
+    }
+    
+    try:
+        # Read from configmap.yaml
+        configmap_path = os.path.join(k8s_path, 'configmap.yaml')
+        if os.path.exists(configmap_path):
+            with open(configmap_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Extract PORT value
+                import re
+                port_match = re.search(r'PORT:\s*"(\d+)"', content)
+                if port_match:
+                    service_info['port'] = int(port_match.group(1))
+        
+        # Read from deployment.yaml for description
+        deployment_path = os.path.join(k8s_path, 'deployment.yaml')
+        if os.path.exists(deployment_path):
+            with open(deployment_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Extract description from labels or annotations
+                desc_match = re.search(r'description:\s*"([^"]*)"', content)
+                if desc_match:
+                    service_info['description'] = desc_match.group(1)
+        
+        # Get file creation time
+        if os.path.exists(k8s_path):
+            import time
+            created_time = os.path.getctime(k8s_path)
+            service_info['created_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(created_time))
+            
+    except Exception as e:
+        print(f"Error reading service info for {service_name}: {e}")
+    
+    return service_info
+
+@app.route('/api/services/<service_name>', methods=['DELETE'])
+def delete_service(service_name):
+    """Delete a service"""
+    try:
+        # Delete ArgoCD application (if exists)
+        try:
+            subprocess.run(['kubectl', 'delete', 'application', service_name, '-n', 'argocd'], 
+                          check=True)
+        except subprocess.CalledProcessError:
+            pass  # Application might not exist
+        
+        # Delete namespace (if exists)
+        try:
+            subprocess.run(['kubectl', 'delete', 'namespace', service_name], 
+                          check=True)
+        except subprocess.CalledProcessError:
+            pass  # Namespace might not exist
+        
+        # Delete service folder from Repo B
+        repo_b_path = f"E:\\Study\\demo_fiss1_B\\services\\{service_name}"
+        if os.path.exists(repo_b_path):
+            shutil.rmtree(repo_b_path)
+        
+        # Delete from database (if exists)
+        try:
+            service_manager.delete_service(service_name)
+        except:
+            pass  # Service might not be in database
+        
+        return jsonify({'message': f'Service {service_name} deleted successfully'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/sync', methods=['POST'])
+def sync_services():
+    """Sync services from Repo B folder structure to database"""
+    try:
+        repo_b_path = "E:\\Study\\demo_fiss1_B\\services"
+        synced_count = 0
+        
+        if not os.path.exists(repo_b_path):
+            return jsonify({'error': 'Repo B services directory not found'}), 404
+        
+        # Get all service directories
+        service_dirs = [d for d in os.listdir(repo_b_path) 
+                       if os.path.isdir(os.path.join(repo_b_path, d)) and d.startswith('demo-v')]
+        
+        for service_name in service_dirs:
+            service_path = os.path.join(repo_b_path, service_name)
+            k8s_path = os.path.join(service_path, 'k8s')
+            
+            if not os.path.exists(k8s_path):
+                continue
+            
+            # Read service information
+            service_info = read_service_info(service_name, k8s_path)
+            
+            # Check if service already exists in database
+            existing_services = service_manager.get_services()
+            if not any(s['name'] == service_name for s in existing_services):
+                # Add to database
+                db_service_data = {
+                    'name': service_name,
+                    'namespace': service_name,
+                    'port': service_info.get('port', 5001),
+                    'description': service_info.get('description', f'Demo service {service_name}'),
+                    'repo_url': '',  # Not available from folder structure
+                    'metadata': {
+                        'synced_from': 'repo_b',
+                        'folder_path': service_path
+                    }
+                }
+                
+                if service_manager.add_service(db_service_data):
+                    synced_count += 1
+        
+        return jsonify({
+            'message': f'Synced {synced_count} services from Repo B',
+            'synced_count': synced_count
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/restart', methods=['POST'])
+def restart_service(service_name):
+    """Restart a service"""
+    try:
+        # Restart deployment
+        subprocess.run(['kubectl', 'rollout', 'restart', 'deployment', service_name, '-n', service_name], 
+                      check=True)
+        
+        return jsonify({'message': f'Service {service_name} restarted successfully'})
+        
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': f'Failed to restart service: {e.stderr}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/logs')
+def get_service_logs(service_name):
+    """Get service logs"""
+    try:
+        # Get pods for the service
+        result = subprocess.run(['kubectl', 'get', 'pods', '-n', service_name, 
+                               '-l', f'app={service_name}', '-o', 'json'], 
+                               capture_output=True, text=True, check=True)
+        pods = json.loads(result.stdout)
+        
+        if not pods['items']:
+            return jsonify({'error': 'No pods found'}), 404
+        
+        # Get logs from first pod
+        pod_name = pods['items'][0]['metadata']['name']
+        logs_result = subprocess.run(['kubectl', 'logs', pod_name, '-n', service_name, '--tail=100'], 
+                                    capture_output=True, text=True, check=True)
+        
+        return jsonify({'logs': logs_result.stdout})
+        
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': f'Failed to get logs: {e.stderr}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/details')
+def get_service_details(service_name):
+    """Get detailed service information"""
+    try:
+        # Get deployment details
+        deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, 
+                                      '-n', service_name, '-o', 'json'], 
+                                      capture_output=True, text=True, check=True)
+        deployment = json.loads(deploy_result.stdout)
+        
+        # Get service details
+        svc_result = subprocess.run(['kubectl', 'get', 'service', f'{service_name}-service', 
+                                   '-n', service_name, '-o', 'json'], 
+                                   capture_output=True, text=True, check=True)
+        service_info = json.loads(svc_result.stdout)
+        
+        # Get pods
+        pods_result = subprocess.run(['kubectl', 'get', 'pods', '-n', service_name, 
+                                    '-l', f'app={service_name}', '-o', 'json'], 
+                                    capture_output=True, text=True, check=True)
+        pods = json.loads(pods_result.stdout)
+        
+        return jsonify({
+            'deployment': deployment,
+            'service': service_info,
+            'pods': pods
+        })
+        
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': f'Failed to get service details: {e.stderr}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/create_service', methods=['POST'])
 def create_service():
     try:
@@ -152,6 +506,23 @@ def create_service():
             repo_b_res = generate_repo_b(service_data, repo_url, repo_b_url, repo_b_path, namespace, image_tag_mode)
             if not repo_b_res['success']:
                 return jsonify({'success': False, 'error': f"Repo B update failed: {repo_b_res['error']}"}), 500
+            
+            # Save to database
+            db_service_data = {
+                'name': service_name,
+                'namespace': namespace,
+                'port': int(port),
+                'description': description,
+                'repo_url': repo_url,
+                'metadata': {
+                    'created_by': 'portal',
+                    'template': 'repo_a_template',
+                    'repo_b_url': repo_b_url,
+                    'repo_b_path': repo_b_path
+                }
+            }
+            service_manager.add_service(db_service_data)
+            
             return jsonify({
                 'success': True,
                 'message': f'Service "{service_name}" created successfully!',
@@ -251,12 +622,51 @@ def generate_repository(service_data, repo_url):
         subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=repo_dir, check=False)
         push_proc = subprocess.run(['git', 'push', '-u', 'origin', 'main'], cwd=repo_dir, capture_output=True, text=True)
         if push_proc.returncode != 0:
-            return {
-                'success': False,
-                'error': f"Failed to push to remote: {push_proc.stderr}",
-                'repo_url': repo_url,
-                'clone_url': repo_url
-            }
+            err = push_proc.stderr or ''
+            refusing_workflow = 'refusing to allow a Personal Access Token to create or update workflow' in err
+            if refusing_workflow:
+                # Remove workflow file and retry push as fallback when PAT lacks 'workflow' scope
+                wf_path = os.path.join(repo_dir, '.github', 'workflows', 'ci-cd.yml')
+                try:
+                    if os.path.exists(wf_path):
+                        os.remove(wf_path)
+                        subprocess.run(['git', 'add', '--all'], cwd=repo_dir, check=True)
+                        subprocess.run(['git', 'commit', '-m', 'chore: remove workflow due to missing PAT workflow scope'], cwd=repo_dir, check=False)
+                        retry_proc = subprocess.run(['git', 'push', '-u', 'origin', 'main'], cwd=repo_dir, capture_output=True, text=True)
+                        if retry_proc.returncode != 0:
+                            return {
+                                'success': False,
+                                'error': f"Failed to push (after removing workflow): {retry_proc.stderr}",
+                                'repo_url': repo_url,
+                                'clone_url': repo_url
+                            }
+                    else:
+                        return {
+                            'success': False,
+                            'error': f"Failed to push to remote: {err}",
+                            'repo_url': repo_url,
+                            'clone_url': repo_url
+                        }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'error': f"Push failed and cleanup errored: {e}",
+                        'repo_url': repo_url,
+                        'clone_url': repo_url
+                    }
+            else:
+                return {
+                    'success': False,
+                    'error': f"Failed to push to remote: {err}",
+                    'repo_url': repo_url,
+                    'clone_url': repo_url
+                }
+
+        # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN)
+        try:
+            ensure_repo_secrets(repo_url)
+        except Exception:
+            pass
 
         # Clean up temporary directory
         try:
@@ -497,7 +907,7 @@ jobs:
       with:
         registry: ghcr.io
         username: ${{{{ github.actor }}}}
-        password: ${{{{ secrets.GITHUB_TOKEN }}}}
+        password: ${{{{ secrets.GHCR_TOKEN }}}}
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
@@ -550,10 +960,10 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
 
         # Build remote URL (embed token if available)
         remote = repo_b_url if repo_b_url.endswith('.git') else repo_b_url + '.git'
-        if GITHUB_TOKEN and '://' in repo_b_url:
+        if MANIFESTS_REPO_TOKEN and '://' in repo_b_url:
             parsed_b = urlparse(repo_b_url)
             path_git = parsed_b.path if parsed_b.path.endswith('.git') else parsed_b.path + '.git'
-            remote = f"{parsed_b.scheme}://{GITHUB_TOKEN}@{parsed_b.netloc}{path_git}"
+            remote = f"{parsed_b.scheme}://{MANIFESTS_REPO_TOKEN}@{parsed_b.netloc}{path_git}"
 
         # Clone Repo B to get current history
         clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
