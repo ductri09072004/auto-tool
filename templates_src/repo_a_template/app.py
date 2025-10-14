@@ -193,5 +193,6 @@ if __name__ == '__main__':
     print("   - GET /api/products (products list)")
     print("   - GET /api/orders (orders list)")
     print("   - GET /api/name (service name)")
-    print("🌐 Server running at: http://localhost:5001")
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    port = int(os.environ.get('PORT', 5001))
+    print(f"🌐 Server running at: http://localhost:{port}")
+    app.run(debug=True, host='0.0.0.0', port=port)

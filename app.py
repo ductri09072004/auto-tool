@@ -293,6 +293,7 @@ def generate_app_py(repo_dir, service_data, namespace):
         # Replace placeholders
         content = content.replace('{SERVICE_NAME}', service_name)
         content = content.replace('{NAMESPACE}', namespace)
+        content = content.replace('{PORT}', port)
         
         # Write to repo
         with open(os.path.join(repo_dir, 'app.py'), 'w', encoding='utf-8') as f:

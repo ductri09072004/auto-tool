@@ -27,11 +27,11 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_ENV=production
 
 # Expose port
-EXPOSE 5001
+EXPOSE {PORT}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5001/api/health || exit 1
+    CMD curl -f http://localhost:{PORT}/api/health || exit 1
 
 # Run application
 CMD ["python", "app.py"]

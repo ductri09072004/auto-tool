@@ -26,12 +26,12 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pip install waitress
-waitress-serve --host=0.0.0.0 --port=5001 app:app
+waitress-serve --host=0.0.0.0 --port={PORT} app:app
 ```
 
 Mở firewall (nếu cần):
 ```powershell
-New-NetFirewallRule -DisplayName "PythonTest2_5001" -Direction Inbound -Protocol TCP -LocalPort 5001 -Action Allow
+New-NetFirewallRule -DisplayName "PythonTest2_{PORT}" -Direction Inbound -Protocol TCP -LocalPort {PORT} -Action Allow
 ```
 
 ### 2) Docker
@@ -43,14 +43,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && pip install waitress
 COPY . .
 ENV PYTHONUNBUFFERED=1
-EXPOSE 5001
-CMD ["waitress-serve", "--host=0.0.0.0", "--port=5001", "app:app"]
+EXPOSE {PORT}
+CMD ["waitress-serve", "--host=0.0.0.0", "--port={PORT}", "app:app"]
 ```
 
 Build & run:
 ```bash
 docker build -t python-test2-api .
-docker run -d -p 5001:5001 --name python-test2-api python-test2-api
+docker run -d -p {PORT}:{PORT} --name python-test2-api python-test2-api
 ```
 
 ## API Endpoints
