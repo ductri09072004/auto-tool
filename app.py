@@ -211,7 +211,7 @@ def generate_repository(service_data, repo_url):
         
         for root, _, files in os.walk(repo_dir):
             for file in files:
-                if not file.endswith(('.py', '.md', '.yml', '.yaml', '.txt')):
+                if not file.endswith(('.py', '.md', '.yml', '.yaml', '.txt', 'Dockerfile')):
                     continue
                 p = os.path.join(root, file)
                 try:
