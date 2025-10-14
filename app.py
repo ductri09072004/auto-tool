@@ -4,6 +4,7 @@ import subprocess
 import json
 import requests
 import shutil
+import re
 from urllib.parse import urlparse
 from datetime import datetime
 import tempfile
@@ -311,6 +312,39 @@ def get_services():
         
         return jsonify({'services': services})
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/update', methods=['PUT'])
+def update_service(service_name):
+    """Update service configuration"""
+    try:
+        data = request.get_json()
+        
+        # Get GitHub token from headers or use default
+        github_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not github_token:
+            return jsonify({'error': 'GitHub token required'}), 400
+        
+        # Validate required fields (port excluded as it cannot be changed)
+        required_fields = ['description', 'replicas', 'min_replicas', 'max_replicas', 
+                          'cpu_request', 'cpu_limit', 'memory_request', 'memory_limit']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Update service configuration in repository
+        result = update_service_config(service_name, data, github_token)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': f'Service {service_name} updated successfully',
+                'details': result.get('details', {})
+            })
+        else:
+            return jsonify({'error': result['error']}), 500
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1181,6 +1215,104 @@ jobs:
     with open(os.path.join(repo_dir, '.github', 'workflows', 'ci-cd.yml'), 'w') as f:
         f.write(workflow_content)
 
+
+def update_service_config(service_name: str, config_data: dict, github_token: str):
+    """Update service configuration in repository"""
+    try:
+        # Repository details
+        owner, repo = 'ductri09072004', 'demo_fiss1_B'
+        service_path = f"services/{service_name}/k8s"
+        
+        # Prepare remote URL with token
+        remote = f"https://{github_token}@github.com/{owner}/{repo}.git"
+        
+        # Create temp directory
+        tmpdir = tempfile.mkdtemp(prefix='update_service_')
+        clone_dir = os.path.join(tmpdir, 'repo')
+        
+        # Clone repository
+        clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
+        if clone_proc.returncode != 0:
+            return {'success': False, 'error': f'Failed to clone repository: {clone_proc.stderr}'}
+        
+        # Update to latest main
+        subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
+        subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
+        
+        # Update deployment.yaml
+        deployment_path = os.path.join(clone_dir, service_path, 'deployment.yaml')
+        if os.path.exists(deployment_path):
+            with open(deployment_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Update replicas
+            content = re.sub(r'replicas:\s*\d+', f'replicas: {config_data["replicas"]}', content)
+            
+            # Update resources
+            resource_pattern = r'resources:\s*\n\s*requests:\s*\n\s*memory:\s*"[^"]*"\s*\n\s*cpu:\s*"[^"]*"\s*\n\s*limits:\s*\n\s*memory:\s*"[^"]*"\s*\n\s*cpu:\s*"[^"]*"'
+            new_resources = f'''resources:
+            requests:
+              memory: "{config_data["memory_request"]}"
+              cpu: "{config_data["cpu_request"]}"
+            limits:
+              memory: "{config_data["memory_limit"]}"
+              cpu: "{config_data["cpu_limit"]}"'''
+            
+            content = re.sub(resource_pattern, new_resources, content, flags=re.MULTILINE | re.DOTALL)
+            
+            # Update description in metadata
+            content = re.sub(r'description:\s*"[^"]*"', f'description: "{config_data["description"]}"', content)
+            
+            with open(deployment_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        
+        # Update configmap.yaml (port excluded as it cannot be changed)
+        configmap_path = os.path.join(clone_dir, service_path, 'configmap.yaml')
+        if os.path.exists(configmap_path):
+            # Note: PORT is not updated to prevent service connectivity issues
+            pass
+        
+        # Update hpa.yaml
+        hpa_path = os.path.join(clone_dir, service_path, 'hpa.yaml')
+        if os.path.exists(hpa_path):
+            with open(hpa_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Update min/max replicas
+            content = re.sub(r'minReplicas:\s*\d+', f'minReplicas: {config_data["min_replicas"]}', content)
+            content = re.sub(r'maxReplicas:\s*\d+', f'maxReplicas: {config_data["max_replicas"]}', content)
+            
+            with open(hpa_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        
+        # Commit and push changes
+        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+        
+        # Check if there are changes
+        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+        if st.stdout.strip():
+            subprocess.run(['git', 'commit', '-m', f'Update configuration for {service_name}'], cwd=clone_dir, check=True)
+            push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
+            if push_proc.returncode != 0:
+                return {'success': False, 'error': f'Failed to push changes: {push_proc.stderr}'}
+        
+        # Clean up
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        
+        return {
+            'success': True,
+            'details': {
+                'service_name': service_name,
+                'updated_files': ['deployment.yaml', 'hpa.yaml'],
+                'repository': f'https://github.com/{owner}/{repo}',
+                'note': 'Port configuration is protected and cannot be changed'
+            }
+        }
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path: str, namespace: str, image_tag_mode: str, github_token: str = None):
     """Prepare Repo B manifests from template and push to Repo B URL."""

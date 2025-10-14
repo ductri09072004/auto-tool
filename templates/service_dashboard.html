@@ -836,6 +836,9 @@
                     <button class="btn btn-sm btn-outline-primary" onclick="applyGitHubToken()">
                         <i class="fas fa-key me-1"></i>Apply
                     </button>
+                    <button class="btn btn-sm btn-outline-secondary ms-1" onclick="clearSavedToken()" title="Clear saved token">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </div>
                 <a class="nav-link me-3" href="/">
                     <i class="fas fa-home me-2"></i>Back to Portal
@@ -1041,6 +1044,19 @@
                             </div>
                         </div>
                         
+                        <!-- Edit Service -->
+                        <div class="col-md-6">
+                            <div class="action-card" onclick="editService()">
+                                <div class="action-icon bg-success">
+                                    <i class="fas fa-edit"></i>
+                                </div>
+                                <div class="action-content">
+                                    <h6>Edit Service</h6>
+                                    <p class="text-muted small">Update service configuration</p>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <!-- Archive Service -->
                         <div class="col-md-6">
                             <div class="action-card" onclick="archiveService()">
@@ -1072,6 +1088,170 @@
         </div>
     </div>
 
+    <!-- Edit Service Modal -->
+    <div class="modal fade" id="editServiceModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-edit me-2"></i>
+                        Edit Service Configuration
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <!-- Warning Alert -->
+                    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>⚠️ Important:</strong> Some changes may affect service availability. 
+                        Please review your changes carefully before updating.
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    
+                    <form id="editServiceForm">
+                        <input type="hidden" id="edit_service_name" name="service_name">
+                        
+                        <!-- Basic Information -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <label for="edit_description" class="form-label">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Description
+                                </label>
+                                <input type="text" class="form-control" id="edit_description" name="description" 
+                                       placeholder="Service description">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="edit_port" class="form-label">
+                                    <i class="fas fa-network-wired me-1"></i>
+                                    Container Port
+                                    <i class="fas fa-lock text-secondary ms-1" 
+                                       title="Port cannot be changed - this would break service connectivity"></i>
+                                </label>
+                                <input type="number" class="form-control" id="edit_port" name="port" 
+                                       min="1000" max="65535" readonly disabled>
+                                <small class="text-muted">Port cannot be changed to prevent service connectivity issues.</small>
+                            </div>
+                        </div>
+
+                        <!-- Kubernetes Configuration -->
+                        <div class="mb-4">
+                            <h6 class="mb-3">
+                                <i class="fas fa-cogs me-2"></i>
+                                Kubernetes Configuration
+                            </h6>
+                            
+                            <!-- Replicas -->
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label for="edit_replicas" class="form-label">
+                                        <i class="fas fa-layer-group me-1"></i>
+                                        Number of Pods (Replicas)
+                                    </label>
+                                    <input type="number" class="form-control" id="edit_replicas" name="replicas" 
+                                           min="1" max="10">
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="edit_min_replicas" class="form-label">
+                                        <i class="fas fa-arrow-down me-1"></i>
+                                        Min Replicas (HPA)
+                                        <i class="fas fa-exclamation-triangle text-warning ms-1" 
+                                           title="⚠️ Setting to 1 may cause downtime"></i>
+                                    </label>
+                                    <input type="number" class="form-control" id="edit_min_replicas" name="min_replicas" 
+                                           min="1" max="5" title="Minimum replicas for auto-scaling">
+                                    <small class="text-muted">Minimum: 1. Lower values may cause downtime.</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="edit_max_replicas" class="form-label">
+                                        <i class="fas fa-arrow-up me-1"></i>
+                                        Max Replicas (HPA)
+                                    </label>
+                                    <input type="number" class="form-control" id="edit_max_replicas" name="max_replicas" 
+                                           min="5" max="20">
+                                </div>
+                            </div>
+
+                            <!-- CPU Configuration -->
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="edit_cpu_request" class="form-label">
+                                        <i class="fas fa-microchip me-1"></i>
+                                        CPU Request
+                                    </label>
+                                    <select class="form-select" id="edit_cpu_request" name="cpu_request">
+                                        <option value="50m">50m (0.05 cores)</option>
+                                        <option value="100m">100m (0.1 cores)</option>
+                                        <option value="200m">200m (0.2 cores)</option>
+                                        <option value="250m">250m (0.25 cores)</option>
+                                        <option value="500m">500m (0.5 cores)</option>
+                                        <option value="750m">750m (0.75 cores)</option>
+                                        <option value="1000m">1000m (1 core)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="edit_cpu_limit" class="form-label">
+                                        <i class="fas fa-microchip me-1"></i>
+                                        CPU Limit
+                                    </label>
+                                    <select class="form-select" id="edit_cpu_limit" name="cpu_limit">
+                                        <option value="100m">100m (0.1 cores)</option>
+                                        <option value="200m">200m (0.2 cores)</option>
+                                        <option value="500m">500m (0.5 cores)</option>
+                                        <option value="750m">750m (0.75 cores)</option>
+                                        <option value="1000m">1000m (1 core)</option>
+                                        <option value="1500m">1500m (1.5 cores)</option>
+                                        <option value="2000m">2000m (2 cores)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Memory Configuration -->
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="edit_memory_request" class="form-label">
+                                        <i class="fas fa-memory me-1"></i>
+                                        Memory Request
+                                    </label>
+                                    <select class="form-select" id="edit_memory_request" name="memory_request">
+                                        <option value="64Mi">64Mi (64 MB)</option>
+                                        <option value="128Mi">128Mi (128 MB)</option>
+                                        <option value="256Mi">256Mi (256 MB)</option>
+                                        <option value="512Mi">512Mi (512 MB)</option>
+                                        <option value="1Gi">1Gi (1 GB)</option>
+                                        <option value="2Gi">2Gi (2 GB)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="edit_memory_limit" class="form-label">
+                                        <i class="fas fa-memory me-1"></i>
+                                        Memory Limit
+                                    </label>
+                                    <select class="form-select" id="edit_memory_limit" name="memory_limit">
+                                        <option value="128Mi">128Mi (128 MB)</option>
+                                        <option value="256Mi">256Mi (256 MB)</option>
+                                        <option value="512Mi">512Mi (512 MB)</option>
+                                        <option value="1Gi">1Gi (1 GB)</option>
+                                        <option value="2Gi">2Gi (2 GB)</option>
+                                        <option value="4Gi">4Gi (4 GB)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="updateService()">
+                        <i class="fas fa-save me-2"></i>Update Service
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let currentServices = [];
@@ -1079,6 +1259,8 @@
 
         // Load services on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Restore token from localStorage if available
+            restoreToken();
             loadServices();
         });
 
@@ -1571,6 +1753,46 @@
             }
         }
 
+        // Save token to localStorage
+        function saveToken(token) {
+            try {
+                localStorage.setItem('github_dashboard_token', token);
+            } catch (error) {
+                console.warn('Could not save token to localStorage:', error);
+            }
+        }
+        
+        // Load token from localStorage
+        function loadToken() {
+            try {
+                return localStorage.getItem('github_dashboard_token') || '';
+            } catch (error) {
+                console.warn('Could not load token from localStorage:', error);
+                return '';
+            }
+        }
+        
+        // Clear token from localStorage
+        function clearToken() {
+            try {
+                localStorage.removeItem('github_dashboard_token');
+            } catch (error) {
+                console.warn('Could not clear token from localStorage:', error);
+            }
+        }
+        
+        // Restore token on page load
+        function restoreToken() {
+            const savedToken = loadToken();
+            if (savedToken) {
+                const tokenInput = document.getElementById('githubTokenInput');
+                tokenInput.value = savedToken;
+                window.dashboardToken = savedToken;
+                // Note: No toast message on page load to avoid notification spam
+                console.log('GitHub token restored from previous session');
+            }
+        }
+
         // Apply GitHub token for API calls
         async function applyGitHubToken() {
             const tokenInput = document.getElementById('githubTokenInput');
@@ -1595,15 +1817,219 @@
                     showToast('GitHub token applied successfully!', 'success');
                     // Store token for future API calls
                     window.dashboardToken = token;
+                    // Save token to localStorage for persistence
+                    saveToken(token);
                     // Reload services with new token
                     loadServices();
                 } else {
                     const error = await response.json();
                     showToast(`Invalid token: ${error.error}`, 'error');
+                    // Clear invalid token from storage
+                    clearToken();
                 }
             } catch (error) {
                 showToast('Failed to validate token', 'error');
+                clearToken();
             }
+        }
+
+        // Clear saved token
+        function clearSavedToken() {
+            if (confirm('Are you sure you want to clear the saved GitHub token?')) {
+                clearToken();
+                const tokenInput = document.getElementById('githubTokenInput');
+                tokenInput.value = '';
+                window.dashboardToken = '';
+                showToast('GitHub token cleared', 'info');
+                loadServices(); // Reload services without token
+            }
+        }
+
+        // Edit service function
+        function editService() {
+            if (selectedService) {
+                // Find the service data
+                const service = currentServices.find(s => s.name === selectedService);
+                if (service) {
+                    // Populate the edit form with current values
+                    document.getElementById('edit_service_name').value = service.name;
+                    document.getElementById('edit_description').value = service.description || '';
+                    document.getElementById('edit_port').value = service.port || 5001;
+                    
+                    // Set default values for Kubernetes config (these would need to be fetched from the actual deployment)
+                    document.getElementById('edit_replicas').value = service.replicas || 3;
+                    document.getElementById('edit_min_replicas').value = 2;
+                    document.getElementById('edit_max_replicas').value = 10;
+                    document.getElementById('edit_cpu_request').value = '100m';
+                    document.getElementById('edit_cpu_limit').value = '200m';
+                    document.getElementById('edit_memory_request').value = '128Mi';
+                    document.getElementById('edit_memory_limit').value = '256Mi';
+                    
+                    // Show the edit modal
+                    const modal = new bootstrap.Modal(document.getElementById('editServiceModal'));
+                    modal.show();
+                }
+                bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        // Update service function
+        async function updateService() {
+            const form = document.getElementById('editServiceForm');
+            const formData = new FormData(form);
+            const serviceName = formData.get('service_name');
+            
+            // Validate inputs before proceeding
+            if (!validateServiceConfig(formData)) {
+                return;
+            }
+            
+            const button = document.querySelector('#editServiceModal .btn-primary');
+            const originalText = button.innerHTML;
+            
+            try {
+                button.innerHTML = '<span class="loading"></span> Updating...';
+                button.disabled = true;
+                
+                // Convert FormData to JSON (exclude port as it cannot be changed)
+                const updateData = {
+                    service_name: serviceName,
+                    description: formData.get('description'),
+                    replicas: formData.get('replicas'),
+                    min_replicas: formData.get('min_replicas'),
+                    max_replicas: formData.get('max_replicas'),
+                    cpu_request: formData.get('cpu_request'),
+                    cpu_limit: formData.get('cpu_limit'),
+                    memory_request: formData.get('memory_request'),
+                    memory_limit: formData.get('memory_limit')
+                };
+                
+                const response = await fetch(`/api/services/${serviceName}/update`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${window.dashboardToken || ''}`
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showToast(`Service ${serviceName} updated successfully!`, 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('editServiceModal')).hide();
+                    loadServices(); // Reload the services list
+                } else {
+                    const error = await response.json();
+                    showToast(`Failed to update service: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                showToast('Failed to update service', 'error');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        // Validate service configuration
+        function validateServiceConfig(formData) {
+            const replicas = parseInt(formData.get('replicas'));
+            const minReplicas = parseInt(formData.get('min_replicas'));
+            const maxReplicas = parseInt(formData.get('max_replicas'));
+            const cpuRequest = formData.get('cpu_request');
+            const cpuLimit = formData.get('cpu_limit');
+            const memoryRequest = formData.get('memory_request');
+            const memoryLimit = formData.get('memory_limit');
+            
+            // Validate replicas
+            if (replicas < 1 || replicas > 10) {
+                showToast('Replicas must be between 1 and 10', 'error');
+                return false;
+            }
+            
+            // Validate HPA settings
+            if (minReplicas < 1) {
+                showToast('Minimum replicas cannot be less than 1', 'error');
+                return false;
+            }
+            
+            if (maxReplicas < minReplicas) {
+                showToast('Maximum replicas must be greater than or equal to minimum replicas', 'error');
+                return false;
+            }
+            
+            if (maxReplicas > 20) {
+                showToast('Maximum replicas cannot exceed 20', 'error');
+                return false;
+            }
+            
+            // Validate resource limits
+            if (!validateResourceLimits(cpuRequest, cpuLimit, memoryRequest, memoryLimit)) {
+                return false;
+            }
+            
+            // Show warning for critical changes
+            const warnings = [];
+            if (minReplicas === 1) {
+                warnings.push('Setting min replicas to 1 may cause downtime during deployments');
+            }
+            
+            if (warnings.length > 0) {
+                const proceed = confirm(
+                    '⚠️ WARNING: This change may affect service availability:\n\n' + 
+                    warnings.join('\n') + '\n\nDo you want to continue?'
+                );
+                if (!proceed) {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        // Validate resource limits
+        function validateResourceLimits(cpuRequest, cpuLimit, memoryRequest, memoryLimit) {
+            // Convert to comparable values
+            const cpuReqVal = parseResourceValue(cpuRequest);
+            const cpuLimitVal = parseResourceValue(cpuLimit);
+            const memReqVal = parseResourceValue(memoryRequest);
+            const memLimitVal = parseResourceValue(memoryLimit);
+            
+            // CPU limits must be >= requests
+            if (cpuLimitVal < cpuReqVal) {
+                showToast('CPU limit must be greater than or equal to CPU request', 'error');
+                return false;
+            }
+            
+            // Memory limits must be >= requests
+            if (memLimitVal < memReqVal) {
+                showToast('Memory limit must be greater than or equal to Memory request', 'error');
+                return false;
+            }
+            
+            // Check for very low limits that might cause issues
+            if (cpuLimitVal < 50) {
+                const proceed = confirm('CPU limit is very low (50m). This may cause performance issues. Continue?');
+                if (!proceed) return false;
+            }
+            
+            if (memLimitVal < 128) {
+                const proceed = confirm('Memory limit is very low (128Mi). This may cause OOM kills. Continue?');
+                if (!proceed) return false;
+            }
+            
+            return true;
+        }
+        
+        // Parse resource values for comparison
+        function parseResourceValue(value) {
+            if (value.includes('m')) {
+                return parseInt(value.replace('m', ''));
+            } else if (value.includes('Gi')) {
+                return parseInt(value.replace('Gi', '')) * 1024;
+            } else if (value.includes('Mi')) {
+                return parseInt(value.replace('Mi', ''));
+            }
+            return parseInt(value);
         }
 
         // Auto-refresh every 30 seconds
