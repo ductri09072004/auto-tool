@@ -21,6 +21,17 @@ app = Flask(__name__)
 # Initialize Service Manager
 service_manager = ServiceManager()
 
+# Disable client/proxy caching for portal responses
+@app.after_request
+def add_no_cache_headers(response):
+    try:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    except Exception:
+        pass
+    return response
+
 # GitHub configuration comes from config.py (GITHUB_TOKEN)
 
 # Monitoring configuration
@@ -40,7 +51,7 @@ def _encrypt_secret(public_key: str, secret_value: str) -> str:
     encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
     return encoding.Base64Encoder().encode(encrypted).decode("utf-8")
 
-def ensure_repo_secrets(repo_url: str) -> bool:
+def ensure_repo_secrets(repo_url: str, github_token: str = None) -> bool:
     """Ensure GHCR_TOKEN and MANIFESTS_REPO_TOKEN exist in repo secrets."""
     try:
         parsed = urlparse(repo_url)
@@ -52,8 +63,9 @@ def ensure_repo_secrets(repo_url: str) -> bool:
             return False
         owner, repo_name = parts[0], parts[1]
         base = f"https://api.github.com/repos/{owner}/{repo_name}/actions/secrets"
+        token_to_use = github_token or GITHUB_TOKEN
         headers = {
-            'Authorization': f'token {GITHUB_TOKEN}',
+            'Authorization': f'token {token_to_use}',
             'Accept': 'application/vnd.github+json'
         }
 
@@ -69,9 +81,10 @@ def ensure_repo_secrets(repo_url: str) -> bool:
             return False
 
         # Encrypt and upsert secrets
+        token_to_use_for_secrets = github_token or GHCR_TOKEN
         updates = {
-            'GHCR_TOKEN': GHCR_TOKEN,
-            'MANIFESTS_REPO_TOKEN': MANIFESTS_REPO_TOKEN
+            'GHCR_TOKEN': token_to_use_for_secrets,
+            'MANIFESTS_REPO_TOKEN': token_to_use_for_secrets
         }
         for name, value in updates.items():
             if not value:
@@ -171,34 +184,27 @@ def get_services():
     try:
         services = []
 
-        # Helper: parse owner/repo from DEFAULT_REPO_B_URL
-        def _parse_github_repo(url: str):
-            try:
-                u = urlparse(url)
-                parts = [p for p in u.path.strip('/').split('/') if p]
-                if len(parts) >= 2:
-                    owner, repo = parts[0], parts[1]
-                    if repo.endswith('.git'):
-                        repo = repo[:-4]
-                    return owner, repo
-            except Exception:
-                pass
-            return None, None
+        # Fixed GitHub repo for services listing (no local path, no env var)
+        owner, repo = 'ductri09072004', 'demo_fiss1_B'
 
-        # Fetch services list from GitHub API (remote), not local path
-        owner, repo = _parse_github_repo(DEFAULT_REPO_B_URL)
-        if not owner or not repo:
-            return jsonify({'services': []})
-
-        headers = {'Accept': 'application/vnd.github+json'}
+        headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'dev-portal'}
         if MANIFESTS_REPO_TOKEN:
             headers['Authorization'] = f'token {MANIFESTS_REPO_TOKEN}'
 
-        contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents/services"
+        contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents/services?ref=main"
         resp = requests.get(contents_url, headers=headers)
-        if resp.status_code != 200:
-            return jsonify({'services': []})
-        items = resp.json() if isinstance(resp.json(), list) else []
+        items = []
+        if resp.status_code == 200:
+            body = resp.json()
+            if isinstance(body, list):
+                items = body
+        else:
+            # Fallback: try without ref param
+            resp2 = requests.get(f"https://api.github.com/repos/{owner}/{repo}/contents/services", headers=headers)
+            if resp2.status_code == 200 and isinstance(resp2.json(), list):
+                items = resp2.json()
+            else:
+                return jsonify({'services': []})
 
         # Filter service directories starting with demo-v
         service_dirs = [it['name'] for it in items if it.get('type') == 'dir' and it.get('name','').startswith('demo-v')]
@@ -303,6 +309,40 @@ def get_services():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/debug-list', methods=['GET'])
+def debug_list_services():
+    try:
+        # Fixed GitHub repo for debug listing
+        owner, repo = 'ductri09072004', 'demo_fiss1_B'
+        headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'dev-portal'}
+        if MANIFESTS_REPO_TOKEN:
+            headers['Authorization'] = f'token {MANIFESTS_REPO_TOKEN}'
+        url = f"https://api.github.com/repos/ductri09072004/demo_fiss1_B/contents/services?ref=main"
+        r = requests.get(url, headers=headers)
+        out = {
+            'url': url,
+            'status_code': r.status_code,
+            'rate_limit_remaining': r.headers.get('X-RateLimit-Remaining'),
+            'scopes': r.headers.get('X-OAuth-Scopes'),
+        }
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        # Only include names to keep output small
+        if isinstance(body, list):
+            out['items'] = [
+                {
+                    'name': it.get('name'),
+                    'type': it.get('type')
+                } for it in body
+            ]
+        else:
+            out['body'] = body
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 def read_service_info(service_name, k8s_path):
     """Read service information from k8s files"""
@@ -439,11 +479,16 @@ def delete_service(service_name):
                     except Exception:
                         return None, None
                 owner, repo = _parse_repo(repo_b_url)
-                if owner and repo and MANIFESTS_REPO_TOKEN:
-                    headers = {
-                        'Accept': 'application/vnd.github+json',
-                        'Authorization': f'token {MANIFESTS_REPO_TOKEN}'
-                    }
+                if owner and repo:
+                    # Use default token for deletion since no token is passed from frontend
+                    token_to_use = MANIFESTS_REPO_TOKEN
+                    if token_to_use:
+                        headers = {
+                            'Accept': 'application/vnd.github+json',
+                            'Authorization': f'token {token_to_use}'
+                        }
+                    else:
+                        headers = {'Accept': 'application/vnd.github+json'}
                     import base64
                     def _get_sha(path_in_repo: str):
                         r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}", headers=headers)
@@ -622,6 +667,7 @@ def get_service_details(service_name):
 def create_service():
     try:
         # Get form data
+        github_token = request.form.get('github_token', '').strip()
         service_name = request.form.get('service_name')
         description = request.form.get('description')
         port = request.form.get('port', '')
@@ -632,6 +678,19 @@ def create_service():
         namespace = request.form.get('namespace', '').strip()
         repo_b_path = request.form.get('repo_b_path', '').strip()
         image_tag_mode = request.form.get('image_tag_mode', 'latest').strip()
+        
+        # Validate GitHub token
+        if not github_token:
+            return jsonify({'error': 'GitHub token is required'}), 400
+        
+        # Test GitHub token validity
+        try:
+            headers = {'Authorization': f'token {github_token}', 'Accept': 'application/vnd.github+json'}
+            test_response = requests.get('https://api.github.com/user', headers=headers)
+            if test_response.status_code != 200:
+                return jsonify({'error': 'Invalid GitHub token. Please check your token and try again.'}), 400
+        except Exception as e:
+            return jsonify({'error': f'Failed to validate GitHub token: {str(e)}'}), 400
         
         # Kubernetes configuration
         replicas = request.form.get('replicas', '3')
@@ -671,11 +730,11 @@ def create_service():
         }
         
         # Generate repository from existing template and push to provided repo URL (Repo A)
-        result = generate_repository(service_data, repo_url)
+        result = generate_repository(service_data, repo_url, github_token)
         
         if result['success']:
             # After Repo A ok → update Repo B manifests
-            repo_b_res = generate_repo_b(service_data, repo_url, repo_b_url, repo_b_path, namespace, image_tag_mode)
+            repo_b_res = generate_repo_b(service_data, repo_url, repo_b_url, repo_b_path, namespace, image_tag_mode, github_token)
             if not repo_b_res['success']:
                 return jsonify({'success': False, 'error': f"Repo B update failed: {repo_b_res['error']}"}), 500
             
@@ -715,7 +774,7 @@ def create_service():
             'error': f'An error occurred: {str(e)}'
         }), 500
 
-def generate_repository(service_data, repo_url):
+def generate_repository(service_data, repo_url, github_token=None):
     """Generate repository from E:\\Study\\demo_fiss1 template and push to provided GitHub repo URL"""
     try:
         service_name = service_data['service_name']
@@ -781,10 +840,11 @@ def generate_repository(service_data, repo_url):
 
         # Prepare remote URL (embed token if available)
         remote = repo_url
-        if GITHUB_TOKEN and '://' in repo_url:
+        token_to_use = github_token or GITHUB_TOKEN
+        if token_to_use and '://' in repo_url:
             parsed = urlparse(repo_url)
             # Insert token as basic auth in URL: https://TOKEN@github.com/owner/repo.git
-            remote = f"{parsed.scheme}://{GITHUB_TOKEN}@{parsed.netloc}{parsed.path}"
+            remote = f"{parsed.scheme}://{token_to_use}@{parsed.netloc}{parsed.path}"
 
         # Set remote and push
         subprocess.run(['git', 'remote', 'remove', 'origin'], cwd=repo_dir, check=False)
@@ -836,7 +896,7 @@ def generate_repository(service_data, repo_url):
 
         # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN)
         try:
-            ensure_repo_secrets(repo_url)
+            ensure_repo_secrets(repo_url, github_token)
         except Exception:
             pass
 
@@ -1093,7 +1153,7 @@ jobs:
         f.write(workflow_content)
 
 
-def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path: str, namespace: str, image_tag_mode: str):
+def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path: str, namespace: str, image_tag_mode: str, github_token: str = None):
     """Prepare Repo B manifests from template and push to Repo B URL."""
     try:
         service_name = service_data['service_name']
@@ -1132,10 +1192,11 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
 
         # Build remote URL (embed token if available)
         remote = repo_b_url if repo_b_url.endswith('.git') else repo_b_url + '.git'
-        if MANIFESTS_REPO_TOKEN and '://' in repo_b_url:
+        token_to_use = github_token or MANIFESTS_REPO_TOKEN
+        if token_to_use and '://' in repo_b_url:
             parsed_b = urlparse(repo_b_url)
             path_git = parsed_b.path if parsed_b.path.endswith('.git') else parsed_b.path + '.git'
-            remote = f"{parsed_b.scheme}://{MANIFESTS_REPO_TOKEN}@{parsed_b.netloc}{path_git}"
+            remote = f"{parsed_b.scheme}://{token_to_use}@{parsed_b.netloc}{path_git}"
 
         # Clone Repo B to get current history
         clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)

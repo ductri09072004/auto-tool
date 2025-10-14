@@ -7,9 +7,9 @@ import os
 
 # GitHub Tokens Configuration
 # All tokens use the same value as requested
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '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')
-GHCR_TOKEN = os.getenv('GHCR_TOKEN', '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')
-MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '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')
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
+GHCR_TOKEN = os.getenv('GHCR_TOKEN', '')
+MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
 
 # Token Usage:
 # - GITHUB_TOKEN: For general GitHub API operations (create repos, push code)
@@ -45,11 +45,12 @@ def validate_tokens():
     
     missing_tokens = []
     for name, token in tokens.items():
-        if not token or token == 'your_github_token_here':
+        if not token:
             missing_tokens.append(name)
     
     if missing_tokens:
-        print(f"⚠️ Warning: Missing or default tokens: {', '.join(missing_tokens)}")
+        print(f"⚠️ Warning: No default tokens configured: {', '.join(missing_tokens)}")
+        print("💡 Tokens must be provided through the web interface form.")
         return False
     
     print("✅ All GitHub tokens configured")
