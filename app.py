@@ -98,15 +98,21 @@ def create_service():
         # Get form data
         service_name = request.form.get('service_name')
         description = request.form.get('description')
-        port = request.form.get('port', '5000')
-        mock_data_type = request.form.get('mock_data_type', 'users')
-        data_count = request.form.get('data_count', '100')
-        endpoints = request.form.getlist('endpoints')
+        port = request.form.get('port', '5001')
         repo_url = request.form.get('repo_url', '').strip()
         repo_b_url = request.form.get('repo_b_url', '').strip()
         namespace = request.form.get('namespace', '').strip()
         repo_b_path = request.form.get('repo_b_path', '').strip()
         image_tag_mode = request.form.get('image_tag_mode', 'latest').strip()
+        
+        # Kubernetes configuration
+        replicas = request.form.get('replicas', '3')
+        min_replicas = request.form.get('min_replicas', '2')
+        max_replicas = request.form.get('max_replicas', '10')
+        cpu_request = request.form.get('cpu_request', '100m')
+        cpu_limit = request.form.get('cpu_limit', '200m')
+        memory_request = request.form.get('memory_request', '128Mi')
+        memory_limit = request.form.get('memory_limit', '256Mi')
         
         # Validate input
         if not service_name:
@@ -126,9 +132,13 @@ def create_service():
             'service_name': service_name,
             'description': description,
             'port': port,
-            'mock_data_type': mock_data_type,
-            'data_count': int(data_count),
-            'endpoints': endpoints,
+            'replicas': replicas,
+            'min_replicas': min_replicas,
+            'max_replicas': max_replicas,
+            'cpu_request': cpu_request,
+            'cpu_limit': cpu_limit,
+            'memory_request': memory_request,
+            'memory_limit': memory_limit,
             'created_at': datetime.now().isoformat()
         }
         
@@ -500,13 +510,18 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
     """Prepare Repo B manifests from template and push to Repo B URL."""
     try:
         service_name = service_data['service_name']
-        container_port = service_data.get('port', '5000')
+        container_port = service_data.get('port', '5001')
         service_port = '80'
         health_path = '/api/health'
         domain = 'example.local'
         base_path = '/api'
-        min_replicas = '1'
-        max_replicas = '3'
+        replicas = service_data.get('replicas', '3')
+        min_replicas = service_data.get('min_replicas', '2')
+        max_replicas = service_data.get('max_replicas', '10')
+        cpu_request = service_data.get('cpu_request', '100m')
+        cpu_limit = service_data.get('cpu_limit', '200m')
+        memory_request = service_data.get('memory_request', '128Mi')
+        memory_limit = service_data.get('memory_limit', '256Mi')
 
         # Parse Repo A URL → owner/repo
         parsed = urlparse(repo_a_url)
@@ -573,8 +588,14 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             '{HEALTH_PATH}': health_path,
             '{DOMAIN}': domain,
             '{BASE_PATH}': base_path,
+            '{REPLICAS}': str(replicas),
             '{MIN_REPLICAS}': str(min_replicas),
             '{MAX_REPLICAS}': str(max_replicas),
+            '{CPU_REQUEST}': cpu_request,
+            '{CPU_LIMIT}': cpu_limit,
+            '{MEMORY_REQUEST}': memory_request,
+            '{MEMORY_LIMIT}': memory_limit,
+            '{PORT}': str(container_port),
             '{TIMESTAMP}': timestamp,
             # Backward-compat: replace legacy hardcoded names if encountered
             'demo-fiss': namespace,
