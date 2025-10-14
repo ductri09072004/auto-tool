@@ -170,26 +170,83 @@ def get_services():
     """Get list of all services from Repo B folder structure"""
     try:
         services = []
-        repo_b_path = "E:\\Study\\demo_fiss1_B\\services"
-        
-        # Check if services directory exists
-        if not os.path.exists(repo_b_path):
+
+        # Helper: parse owner/repo from DEFAULT_REPO_B_URL
+        def _parse_github_repo(url: str):
+            try:
+                u = urlparse(url)
+                parts = [p for p in u.path.strip('/').split('/') if p]
+                if len(parts) >= 2:
+                    owner, repo = parts[0], parts[1]
+                    if repo.endswith('.git'):
+                        repo = repo[:-4]
+                    return owner, repo
+            except Exception:
+                pass
+            return None, None
+
+        # Fetch services list from GitHub API (remote), not local path
+        owner, repo = _parse_github_repo(DEFAULT_REPO_B_URL)
+        if not owner or not repo:
             return jsonify({'services': []})
-        
-        # Get all service directories
-        service_dirs = [d for d in os.listdir(repo_b_path) 
-                       if os.path.isdir(os.path.join(repo_b_path, d)) and d.startswith('demo-v')]
+
+        headers = {'Accept': 'application/vnd.github+json'}
+        if MANIFESTS_REPO_TOKEN:
+            headers['Authorization'] = f'token {MANIFESTS_REPO_TOKEN}'
+
+        contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents/services"
+        resp = requests.get(contents_url, headers=headers)
+        if resp.status_code != 200:
+            return jsonify({'services': []})
+        items = resp.json() if isinstance(resp.json(), list) else []
+
+        # Filter service directories starting with demo-v
+        service_dirs = [it['name'] for it in items if it.get('type') == 'dir' and it.get('name','').startswith('demo-v')]
         
         for service_name in service_dirs:
-            service_path = os.path.join(repo_b_path, service_name)
-            k8s_path = os.path.join(service_path, 'k8s')
-            
-            # Skip if k8s directory doesn't exist
-            if not os.path.exists(k8s_path):
-                continue
-            
-            # Read service information from files
-            service_info = read_service_info(service_name, k8s_path)
+            # Build remote file fetchers
+            def _read_remote_file(path_in_repo: str) -> str:
+                file_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}"
+                r = requests.get(file_url, headers=headers)
+                if r.status_code != 200:
+                    return ''
+                j = r.json()
+                if isinstance(j, dict) and j.get('encoding') == 'base64' and j.get('content'):
+                    import base64
+                    try:
+                        return base64.b64decode(j['content']).decode('utf-8', errors='ignore')
+                    except Exception:
+                        return ''
+                # fallback: try download_url
+                dl = j.get('download_url') if isinstance(j, dict) else None
+                if dl:
+                    rr = requests.get(dl)
+                    return rr.text if rr.status_code == 200 else ''
+                return ''
+
+            # Read service information from remote k8s files
+            service_info = {
+                'port': 5001,
+                'description': f'Demo service {service_name}',
+                'created_at': 'Unknown'
+            }
+            try:
+                # configmap
+                cfg = _read_remote_file(f"services/{service_name}/k8s/configmap.yaml")
+                if cfg:
+                    import re
+                    m = re.search(r'PORT:\s*"(\d+)"', cfg)
+                    if m:
+                        service_info['port'] = int(m.group(1))
+                # deployment desc
+                dep = _read_remote_file(f"services/{service_name}/k8s/deployment.yaml")
+                if dep:
+                    import re
+                    md = re.search(r'description:\s*"([^"]*)"', dep)
+                    if md:
+                        service_info['description'] = md.group(1)
+            except Exception:
+                pass
             
             # Get Kubernetes status if available
             try:
@@ -235,8 +292,8 @@ def get_services():
                 'description': service_info.get('description', f'Demo service {service_name}'),
                 'created_at': service_info.get('created_at', 'Unknown'),
                 'status': status,
-                'repo_path': service_path,
-                'k8s_path': k8s_path
+                'repo_path': f"https://github.com/{owner}/{repo}/tree/main/services/{service_name}",
+                'k8s_path': f"https://github.com/{owner}/{repo}/tree/main/services/{service_name}/k8s"
             })
         
         # Sort by service name
@@ -292,30 +349,145 @@ def read_service_info(service_name, k8s_path):
 def delete_service(service_name):
     """Delete a service"""
     try:
-        # Delete ArgoCD application (if exists)
+        # 1) Delete ArgoCD application (remove finalizers if blocking)
         try:
-            subprocess.run(['kubectl', 'delete', 'application', service_name, '-n', 'argocd'], 
-                          check=True)
+            subprocess.run(['kubectl', 'delete', 'application', service_name, '-n', 'argocd'], check=True)
         except subprocess.CalledProcessError:
-            pass  # Application might not exist
-        
-        # Delete namespace (if exists)
+            # try remove finalizers then delete again
+            try:
+                subprocess.run([
+                    'kubectl','patch','application',service_name,'-n','argocd',
+                    "--type","merge","-p","{\"metadata\":{\"finalizers\":null}}"
+                ], check=True)
+                subprocess.run(['kubectl', 'delete', 'application', service_name, '-n', 'argocd'], check=False)
+            except subprocess.CalledProcessError:
+                pass
+
+        # 2) Proactively delete namespaced resources that often block deletion
         try:
-            subprocess.run(['kubectl', 'delete', 'namespace', service_name], 
-                          check=True)
+            resource_groups = [
+                ['deployment','statefulset','daemonset','replicaset','pod'],
+                ['service','ingress','endpoints'],
+                ['configmap','secret','serviceaccount'],
+                ['job','cronjob','hpa'],
+                ['pvc']
+            ]
+            for group in resource_groups:
+                subprocess.run(['kubectl','delete',*group,'--all','-n',service_name,'--ignore-not-found'], check=False, capture_output=True, text=True)
+
+            # Force delete any remaining pods
+            subprocess.run(['kubectl','delete','pod','--all','-n',service_name,'--grace-period=0','--force','--ignore-not-found'], check=False, capture_output=True, text=True)
+            # Extra sweep: delete all built-in resources regardless of label
+            subprocess.run(['kubectl','delete','all','--all','-n',service_name,'--ignore-not-found','--wait=false'], check=False, capture_output=True, text=True)
+            subprocess.run(['kubectl','delete','pvc','--all','-n',service_name,'--ignore-not-found','--wait=false'], check=False, capture_output=True, text=True)
+        except Exception:
+            pass
+
+        # 3) Delete namespace (remove finalizers if stuck terminating)
+        try:
+            subprocess.run(['kubectl', 'delete', 'namespace', service_name], check=True)
         except subprocess.CalledProcessError:
-            pass  # Namespace might not exist
+            # remove finalizers
+            try:
+                # fetch namespace json
+                ns_json = subprocess.run(['kubectl','get','ns',service_name,'-o','json'], capture_output=True, text=True, check=True)
+                data = json.loads(ns_json.stdout)
+                if 'spec' in data and isinstance(data.get('spec'), dict):
+                    data['spec'].pop('finalizers', None)
+                # write temp file
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
+                tmp.write(json.dumps(data).encode('utf-8'))
+                tmp.close()
+                subprocess.run(['kubectl','replace','--raw',f'/api/v1/namespaces/{service_name}/finalize','-f',tmp.name], check=False)
+            except Exception:
+                pass
         
-        # Delete service folder from Repo B
+        # 4) Delete service folder from local Repo B
         repo_b_path = f"E:\\Study\\demo_fiss1_B\\services\\{service_name}"
         if os.path.exists(repo_b_path):
             shutil.rmtree(repo_b_path)
+            # If local Repo B is a git repo, commit and push
+            try:
+                repo_b_root = "E:\\Study\\demo_fiss1_B"
+                if os.path.isdir(os.path.join(repo_b_root, '.git')):
+                    subprocess.run(['git','add','-A'], cwd=repo_b_root, check=False)
+                    subprocess.run(['git','config','user.email','dev-portal@local'], cwd=repo_b_root, check=False)
+                    subprocess.run(['git','config','user.name','Dev Portal'], cwd=repo_b_root, check=False)
+                    subprocess.run(['git','commit','-m',f'chore: remove service {service_name}'], cwd=repo_b_root, check=False)
+                    subprocess.run(['git','push','origin','main'], cwd=repo_b_root, check=False)
+            except Exception:
+                pass
+
+        # 5) Delete service folder from remote Repo B (fallback to DEFAULT_REPO_B_URL when DB missing)
+        try:
+            # find service in DB to get repo_b_url
+            services = service_manager.get_services()
+            svc = next((s for s in services if s.get('name') == service_name), None)
+            repo_b_url = (svc or {}).get('metadata', {}).get('repo_b_url', '') if svc else ''
+            if not repo_b_url:
+                repo_b_url = DEFAULT_REPO_B_URL
+            if repo_b_url:
+                # Use GitHub Contents API to delete files in services/<service_name>/
+                def _parse_repo(url: str):
+                    try:
+                        u = urlparse(url)
+                        parts = [p for p in u.path.strip('/').split('/') if p]
+                        owner, repo = parts[0], parts[1]
+                        if repo.endswith('.git'):
+                            repo = repo[:-4]
+                        return owner, repo
+                    except Exception:
+                        return None, None
+                owner, repo = _parse_repo(repo_b_url)
+                if owner and repo and MANIFESTS_REPO_TOKEN:
+                    headers = {
+                        'Accept': 'application/vnd.github+json',
+                        'Authorization': f'token {MANIFESTS_REPO_TOKEN}'
+                    }
+                    import base64
+                    def _get_sha(path_in_repo: str):
+                        r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}", headers=headers)
+                        if r.status_code == 200:
+                            j = r.json()
+                            if isinstance(j, dict):
+                                return j.get('sha')
+                        return None
+                    def _delete_file(path_in_repo: str, message: str):
+                        sha = _get_sha(path_in_repo)
+                        if not sha:
+                            return
+                        requests.delete(
+                            f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}",
+                            headers=headers,
+                            json={'message': message, 'sha': sha, 'branch': 'main'}
+                        )
+                    # Known files under k8s and grafana to remove
+                    files_to_delete = [
+                        f"services/{service_name}/k8s/deployment.yaml",
+                        f"services/{service_name}/k8s/service.yaml",
+                        f"services/{service_name}/k8s/configmap.yaml",
+                        f"services/{service_name}/k8s/hpa.yaml",
+                        f"services/{service_name}/k8s/ingress.yaml",
+                        f"services/{service_name}/k8s/ingress-gateway.yaml",
+                        f"services/{service_name}/k8s/namespace.yaml",
+                        f"services/{service_name}/k8s/secret.yaml",
+                        f"services/{service_name}/k8s/argocd-application.yaml",
+                        f"services/{service_name}/grafana/dashboard.json",
+                        f"services/{service_name}/grafana/import_dashboard.ps1",
+                    ]
+                    for p in files_to_delete:
+                        try:
+                            _delete_file(p, f"remove service {service_name}")
+                        except Exception:
+                            pass
+        except Exception:
+            pass
         
-        # Delete from database (if exists)
+        # 6) Delete from database (if exists)
         try:
             service_manager.delete_service(service_name)
-        except:
-            pass  # Service might not be in database
+        except Exception:
+            pass
         
         return jsonify({'message': f'Service {service_name} deleted successfully'})
         
