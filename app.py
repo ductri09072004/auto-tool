@@ -14,6 +14,9 @@ from service_manager import ServiceManager
 from api_db import register_db_api
 from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, DASHBOARD_TOKEN
 
+# Check if running on Railway (cloud) or local
+IS_RAILWAY = os.environ.get('RAILWAY_ENVIRONMENT') is not None
+
 # Global variable to track port-forward process
 port_forward_process = None
 try:
@@ -253,6 +256,10 @@ def get_services():
                 pass
 
             try:
+                if IS_RAILWAY:
+                    # Skip kubectl commands when running on Railway
+                    raise Exception("Running on Railway, skipping kubectl")
+                
                 subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
                 deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
                 deployment = json.loads(deploy_result.stdout)
@@ -306,6 +313,10 @@ def get_services():
                     print(f"Warning: Could not get health metrics for {service_name}: {e}")
 
                 try:
+                    if IS_RAILWAY:
+                        # Skip kubectl commands when running on Railway
+                        raise Exception("Running on Railway, skipping kubectl")
+                    
                     argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
                     argocd_app = json.loads(argocd_result.stdout)
                     health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
