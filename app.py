@@ -9,8 +9,13 @@ from urllib.parse import urlparse
 from datetime import datetime
 import tempfile
 import time
+import threading
 from service_manager import ServiceManager
+from api_db import register_db_api
 from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, DASHBOARD_TOKEN
+
+# Global variable to track port-forward process
+port_forward_process = None
 try:
     # PyNaCl is required to encrypt secrets for GitHub API
     from nacl import encoding, public
@@ -21,6 +26,44 @@ app = Flask(__name__)
 
 # Initialize Service Manager
 service_manager = ServiceManager()
+register_db_api(app, service_manager)
+
+def start_port_forward():
+    """Start port-forward in background if not already running"""
+    global port_forward_process
+    
+    # Check if port-forward is already running
+    if port_forward_process and port_forward_process.poll() is None:
+        print("Port-forward already running")
+        return True
+    
+    try:
+        # Start port-forward in background
+        print("Starting port-forward...")
+        port_forward_process = subprocess.Popen([
+            'kubectl', '-n', 'ingress-nginx', 'port-forward', 
+            'svc/ingress-nginx-controller', '8081:80'
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        # Wait a moment to see if it starts successfully
+        time.sleep(1)
+        if port_forward_process.poll() is None:
+            print("Port-forward started successfully")
+            return True
+        else:
+            print("Failed to start port-forward")
+            return False
+            
+    except Exception as e:
+        print(f"Error starting port-forward: {e}")
+        return False
+
+def stop_port_forward():
+    """Stop port-forward process"""
+    global port_forward_process
+    if port_forward_process and port_forward_process.poll() is None:
+        port_forward_process.terminate()
+        print("Port-forward stopped")
 
 # Disable client/proxy caching for portal responses
 @app.after_request
@@ -181,137 +224,144 @@ def dashboard():
 # Service Management API Endpoints
 @app.route('/api/services', methods=['GET'])
 def get_services():
-    """Get list of all services from Repo B folder structure"""
+    """Get list of services from MongoDB, enrich with K8s + health metrics."""
     try:
         services = []
 
-        # Fixed GitHub repo for services listing (no local path, no env var)
-        owner, repo = 'ductri09072004', 'demo_fiss1_B'
+        db_services = service_manager.get_services() or []
+        default_repo_url = DEFAULT_REPO_B_URL
 
-        headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'dev-portal'}
-        
-        # Get token from query parameter or use default
-        token_param = request.args.get('token', '')
-        token_to_use = token_param or DASHBOARD_TOKEN or MANIFESTS_REPO_TOKEN
-        if token_to_use:
-            headers['Authorization'] = f'token {token_to_use}'
+        for svc in db_services:
+            service_name = svc.get('name') or svc.get('service_name')
+            if not service_name:
+                continue
 
-        contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents/services?ref=main"
-        resp = requests.get(contents_url, headers=headers)
-        items = []
-        if resp.status_code == 200:
-            body = resp.json()
-            if isinstance(body, list):
-                items = body
-        else:
-            # Fallback: try without ref param
-            resp2 = requests.get(f"https://api.github.com/repos/{owner}/{repo}/contents/services", headers=headers)
-            if resp2.status_code == 200 and isinstance(resp2.json(), list):
-                items = resp2.json()
-            else:
-                return jsonify({'services': []})
+            port = int(svc.get('port') or 5001)
+            description = svc.get('description') or f'Demo service {service_name}'
+            created_at = svc.get('created_at') or 'Unknown'
 
-        # Filter service directories starting with demo-v
-        service_dirs = [it['name'] for it in items if it.get('type') == 'dir' and it.get('name','').startswith('demo-v')]
-        
-        for service_name in service_dirs:
-            # Build remote file fetchers
-            def _read_remote_file(path_in_repo: str) -> str:
-                file_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}"
-                r = requests.get(file_url, headers=headers)
-                if r.status_code != 200:
-                    return ''
-                j = r.json()
-                if isinstance(j, dict) and j.get('encoding') == 'base64' and j.get('content'):
-                    import base64
-                    try:
-                        return base64.b64decode(j['content']).decode('utf-8', errors='ignore')
-                    except Exception:
-                        return ''
-                # fallback: try download_url
-                dl = j.get('download_url') if isinstance(j, dict) else None
-                if dl:
-                    rr = requests.get(dl)
-                    return rr.text if rr.status_code == 200 else ''
-                return ''
-
-            # Read service information from remote k8s files
-            service_info = {
-                'port': 5001,
-                'description': f'Demo service {service_name}',
-                'created_at': 'Unknown'
-            }
+            metadata = svc.get('metadata', {}) if isinstance(svc.get('metadata'), dict) else {}
+            repo_b_url = metadata.get('repo_b_url') or default_repo_url
+            owner_repo = 'ductri09072004/demo_fiss1_B'
             try:
-                # configmap
-                cfg = _read_remote_file(f"services/{service_name}/k8s/configmap.yaml")
-                if cfg:
-                    import re
-                    m = re.search(r'PORT:\s*"(\d+)"', cfg)
-                    if m:
-                        service_info['port'] = int(m.group(1))
-                # deployment desc
-                dep = _read_remote_file(f"services/{service_name}/k8s/deployment.yaml")
-                if dep:
-                    import re
-                    md = re.search(r'description:\s*"([^"]*)"', dep)
-                    if md:
-                        service_info['description'] = md.group(1)
+                if repo_b_url and 'github.com' in repo_b_url:
+                    p = urlparse(repo_b_url)
+                    parts = [x for x in p.path.strip('/').split('/') if x]
+                    if len(parts) >= 2:
+                        owner_repo = f"{parts[0]}/{parts[1].replace('.git','')}"
             except Exception:
                 pass
-            
-            # Get Kubernetes status if available
+
             try:
-                # Check if namespace exists
-                result = subprocess.run(['kubectl', 'get', 'namespace', service_name], 
-                                      capture_output=True, text=True, check=True)
-                
-                # Get deployment status
-                deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, 
-                                              '-n', service_name, '-o', 'json'], 
-                                              capture_output=True, text=True, check=True)
+                subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
+                deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
                 deployment = json.loads(deploy_result.stdout)
-                
-                # Get ArgoCD application status
+
+                cpu_request = 'N/A'
+                cpu_limit = 'N/A'
+                memory_request = 'N/A'
+                memory_limit = 'N/A'
                 try:
-                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, 
-                                                   '-n', 'argocd', '-o', 'json'], 
-                                                   capture_output=True, text=True, check=True)
+                    containers = deployment['spec']['template']['spec']['containers']
+                    if containers:
+                        resources = containers[0].get('resources', {})
+                        reqs = resources.get('requests', {})
+                        lims = resources.get('limits', {})
+                        cpu_request = reqs.get('cpu', 'N/A')
+                        cpu_limit = lims.get('cpu', 'N/A')
+                        memory_request = reqs.get('memory', 'N/A')
+                        memory_limit = lims.get('memory', 'N/A')
+                except Exception as e:
+                    print(f"Warning: Could not extract resources for {service_name}: {e}")
+
+                cpu_usage = 'N/A'
+                memory_usage = 'N/A'
+                disk_usage = 'N/A'
+                process_memory = 'N/A'
+                total_requests = 0
+                avg_response_time = 'N/A'
+                uptime = 'N/A'
+                try:
+                    import requests as http_requests
+                    health_url = f"http://127.0.0.1:8081/api/{service_name}/api/health"
+                    headers = {'Host': 'gateway.local'}
+                    try:
+                        health_response = http_requests.get(health_url, headers=headers, timeout=3)
+                    except requests.exceptions.ConnectionError:
+                        start_port_forward()
+                        time.sleep(2)
+                        health_response = http_requests.get(health_url, headers=headers, timeout=5)
+                    if health_response.status_code == 200:
+                        health_data = health_response.json()
+                        system_metrics = health_data.get('system_metrics', {})
+                        service_metrics = health_data.get('service_metrics', {})
+                        cpu_usage = system_metrics.get('cpu_usage', 'N/A')
+                        memory_usage = system_metrics.get('memory_usage', 'N/A')
+                        disk_usage = system_metrics.get('disk_usage', 'N/A')
+                        process_memory = system_metrics.get('process_memory_mb', 'N/A')
+                        total_requests = service_metrics.get('total_requests', 0)
+                        avg_response_time = service_metrics.get('avg_response_time_ms', 'N/A')
+                        uptime = health_data.get('uptime', 'N/A')
+                except Exception as e:
+                    print(f"Warning: Could not get health metrics for {service_name}: {e}")
+
+                try:
+                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
                     argocd_app = json.loads(argocd_result.stdout)
                     health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
                     sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
                 except subprocess.CalledProcessError:
                     health_status = 'Unknown'
                     sync_status = 'Unknown'
-                
+
                 replicas = deployment['spec'].get('replicas', 1)
                 status = 'active' if health_status == 'Healthy' else 'degraded'
-                
+
             except subprocess.CalledProcessError:
-                # Service not deployed in Kubernetes
                 health_status = 'Not Deployed'
                 sync_status = 'Unknown'
                 replicas = 0
                 status = 'not_deployed'
-            
+                cpu_request = 'N/A'
+                cpu_limit = 'N/A'
+                memory_request = 'N/A'
+                memory_limit = 'N/A'
+                cpu_usage = 'N/A'
+                memory_usage = 'N/A'
+                disk_usage = 'N/A'
+                process_memory = 'N/A'
+                total_requests = 0
+                avg_response_time = 'N/A'
+                uptime = 'N/A'
+
             services.append({
                 'name': service_name,
-                'namespace': service_name,
-                'port': service_info.get('port', 5001),
+                'namespace': svc.get('namespace') or service_name,
+                'port': port,
                 'replicas': replicas,
                 'health_status': health_status,
                 'sync_status': sync_status,
-                'description': service_info.get('description', f'Demo service {service_name}'),
-                'created_at': service_info.get('created_at', 'Unknown'),
+                'description': description,
+                'created_at': created_at,
                 'status': status,
-                'repo_path': f"https://github.com/{owner}/{repo}/tree/main/services/{service_name}",
-                'k8s_path': f"https://github.com/{owner}/{repo}/tree/main/services/{service_name}/k8s"
+                'cpu_request': cpu_request,
+                'cpu_limit': cpu_limit,
+                'memory_request': memory_request,
+                'memory_limit': memory_limit,
+                'cpu_usage': cpu_usage,
+                'memory_usage': memory_usage,
+                'disk_usage': disk_usage,
+                'process_memory': process_memory,
+                'total_requests': total_requests,
+                'avg_response_time': avg_response_time,
+                'uptime': uptime,
+                'repo_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}",
+                'k8s_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}/k8s"
             })
-        
-        # Sort by service name
+
         services.sort(key=lambda x: x['name'])
-        
         return jsonify({'services': services})
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -406,6 +456,8 @@ def debug_list_services():
         return jsonify(out)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+# Mongo-backed APIs are registered in api_db.register_db_api(app, service_manager)
 
 def read_service_info(service_name, k8s_path):
     """Read service information from k8s files"""
@@ -1708,5 +1760,40 @@ spec:
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+@app.route('/api/port-forward/start', methods=['POST'])
+def start_port_forward_endpoint():
+    """Start port-forward manually"""
+    try:
+        success = start_port_forward()
+        if success:
+            return jsonify({'message': 'Port-forward started successfully'})
+        else:
+            return jsonify({'error': 'Failed to start port-forward'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/port-forward/stop', methods=['POST'])
+def stop_port_forward_endpoint():
+    """Stop port-forward manually"""
+    try:
+        stop_port_forward()
+        return jsonify({'message': 'Port-forward stopped successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/port-forward/status', methods=['GET'])
+def port_forward_status():
+    """Check port-forward status"""
+    try:
+        global port_forward_process
+        if port_forward_process and port_forward_process.poll() is None:
+            return jsonify({'status': 'running', 'message': 'Port-forward is active'})
+        else:
+            return jsonify({'status': 'stopped', 'message': 'Port-forward is not running'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=3050)
+    import os
+    port = int(os.environ.get('PORT', 3050))
+    app.run(debug=False, host='0.0.0.0', port=port)

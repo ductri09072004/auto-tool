@@ -831,15 +831,7 @@
                 <i class="fas fa-rocket me-2"></i>Dev Portal
             </a>
             <div class="navbar-nav ms-auto align-items-center">
-                <div class="d-flex align-items-center me-3">
-                    <input id="githubTokenInput" type="password" class="form-control form-control-sm me-2" style="width:260px" placeholder="Enter GitHub Token">
-                    <button class="btn btn-sm btn-outline-primary" onclick="applyGitHubToken()">
-                        <i class="fas fa-key me-1"></i>Apply
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary ms-1" onclick="clearSavedToken()" title="Clear saved token">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
+                
                 <a class="nav-link me-3" href="/">
                     <i class="fas fa-home me-2"></i>Back to Portal
                 </a>
@@ -1088,6 +1080,482 @@
         </div>
     </div>
 
+    <!-- Service Details Modal -->
+    <div class="modal fade" id="serviceDetailsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Service Details
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <!-- Service Overview -->
+                    <div class="row mb-4">
+                        <div class="col-md-8">
+                            <h4 id="detail_service_name" class="text-primary mb-2"></h4>
+                            <p id="detail_description" class="text-muted mb-3"></p>
+                            <div class="d-flex flex-wrap gap-2">
+                                <span class="badge bg-info" id="detail_status"></span>
+                                <span class="badge bg-secondary" id="detail_namespace"></span>
+                                <span class="badge bg-success" id="detail_source"></span>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title">Port</h6>
+                                    <h3 class="text-primary" id="detail_port"></h3>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs for different sections -->
+                    <ul class="nav nav-tabs mb-4" id="serviceDetailsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab">
+                                <i class="fas fa-chart-line me-2"></i>Overview
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="kubernetes-tab" data-bs-toggle="tab" data-bs-target="#kubernetes" type="button" role="tab">
+                                <i class="fas fa-cogs me-2"></i>Kubernetes
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="repositories-tab" data-bs-toggle="tab" data-bs-target="#repositories" type="button" role="tab">
+                                <i class="fas fa-code-branch me-2"></i>Repositories
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics" type="button" role="tab">
+                                <i class="fas fa-chart-line me-2"></i>Real-time Metrics
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="pods-tab" data-bs-toggle="tab" data-bs-target="#pods" type="button" role="tab">
+                                <i class="fas fa-server me-2"></i>Pods
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="serviceDetailsTabContent">
+                        <!-- Overview Tab -->
+                        <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>Basic Information</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Service Name:</strong></div>
+                                                <div class="col-8" id="detail_service_name_overview"></div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Description:</strong></div>
+                                                <div class="col-8" id="detail_description_overview"></div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Port:</strong></div>
+                                                <div class="col-8" id="detail_port_overview"></div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Namespace:</strong></div>
+                                                <div class="col-8" id="detail_namespace_overview"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="fas fa-clock me-2"></i>Timestamps</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Created:</strong></div>
+                                                <div class="col-8" id="detail_created"></div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Updated:</strong></div>
+                                                <div class="col-8" id="detail_updated"></div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Health URL:</strong></div>
+                                                <div class="col-8">
+                                                    <a id="detail_health_url" href="#" target="_blank" class="text-decoration-none">
+                                                        <i class="fas fa-external-link-alt me-1"></i>Check Health
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Kubernetes Tab -->
+                        <div class="tab-pane fade" id="kubernetes" role="tabpanel">
+                            <div class="row">
+                                <!-- Scaling Information -->
+                                <div class="col-md-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-primary text-white">
+                                            <h6 class="mb-0"><i class="fas fa-layer-group me-2"></i>Scaling</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="text-center mb-3">
+                                                <h3 class="text-primary" id="detail_replicas">-</h3>
+                                                <small class="text-muted">Current Replicas</small>
+                                            </div>
+                                            <div class="d-flex justify-content-between">
+                                                <span class="text-muted">Status:</span>
+                                                <span id="detail_scaling_status" class="badge bg-info">Active</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- CPU Resources -->
+                                <div class="col-md-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-warning text-white">
+                                            <h6 class="mb-0"><i class="fas fa-microchip me-2"></i>CPU Resources</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <small class="text-muted">Request</small>
+                                                    <span class="badge bg-light text-dark" id="detail_cpu_request">-</span>
+                                                </div>
+                                                <div class="progress" style="height: 6px;">
+                                                    <div class="progress-bar bg-warning" role="progressbar" style="width: 50%"></div>
+                                                </div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <small class="text-muted">Limit</small>
+                                                    <span class="badge bg-light text-dark" id="detail_cpu_limit">-</span>
+                                                </div>
+                                                <div class="progress" style="height: 6px;">
+                                                    <div class="progress-bar bg-warning" role="progressbar" style="width: 75%"></div>
+                                                </div>
+                                            </div>
+                                            <div class="text-center">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-info-circle me-1"></i>
+                                                    CPU allocation
+                                                </small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Memory Resources -->
+                                <div class="col-md-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-success text-white">
+                                            <h6 class="mb-0"><i class="fas fa-memory me-2"></i>Memory Resources</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <small class="text-muted">Request</small>
+                                                    <span class="badge bg-light text-dark" id="detail_memory_request">-</span>
+                                                </div>
+                                                <div class="progress" style="height: 6px;">
+                                                    <div class="progress-bar bg-success" role="progressbar" style="width: 40%"></div>
+                                                </div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <small class="text-muted">Limit</small>
+                                                    <span class="badge bg-light text-dark" id="detail_memory_limit">-</span>
+                                                </div>
+                                                <div class="progress" style="height: 6px;">
+                                                    <div class="progress-bar bg-success" role="progressbar" style="width: 60%"></div>
+                                                </div>
+                                            </div>
+                                            <div class="text-center">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-info-circle me-1"></i>
+                                                    Memory allocation
+                                                </small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Resource Summary Table -->
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="fas fa-table me-2"></i>Resource Summary</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="table-responsive">
+                                                <table class="table table-striped table-hover">
+                                                    <thead class="table-dark">
+                                                        <tr>
+                                                            <th>Resource Type</th>
+                                                            <th>Request</th>
+                                                            <th>Limit</th>
+                                                            <th>Status</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr>
+                                                            <td>
+                                                                <i class="fas fa-microchip me-2 text-warning"></i>
+                                                                <strong>CPU</strong>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-warning text-dark" id="detail_cpu_request_table">-</span>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-warning text-dark" id="detail_cpu_limit_table">-</span>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-success" id="detail_cpu_status">Configured</span>
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td>
+                                                                <i class="fas fa-memory me-2 text-success"></i>
+                                                                <strong>Memory</strong>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-success text-dark" id="detail_memory_request_table">-</span>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-success text-dark" id="detail_memory_limit_table">-</span>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-success" id="detail_memory_status">Configured</span>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Repositories Tab -->
+                        <div class="tab-pane fade" id="repositories" role="tabpanel">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="fas fa-code me-2"></i>Repository A (Code)</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Repository:</strong></div>
+                                                <div class="col-8">
+                                                    <a id="detail_repo_a" href="#" target="_blank" class="text-decoration-none">
+                                                        <i class="fas fa-external-link-alt me-1"></i>View Repository
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="fas fa-cube me-2"></i>Repository B (Manifests)</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Repository:</strong></div>
+                                                <div class="col-8">
+                                                    <a id="detail_repo_b" href="#" target="_blank" class="text-decoration-none">
+                                                        <i class="fas fa-external-link-alt me-1"></i>View Repository
+                                                    </a>
+                                                </div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Image:</strong></div>
+                                                <div class="col-8" id="detail_image"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Real-time Metrics Tab -->
+                        <div class="tab-pane fade" id="metrics" role="tabpanel">
+                            <div class="row">
+                                <!-- System Metrics -->
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-info text-white">
+                                            <h6 class="mb-0"><i class="fas fa-microchip me-2"></i>System Metrics</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row mb-3">
+                                                <div class="col-6">
+                                                    <div class="text-center">
+                                                        <h4 class="text-primary" id="detail_cpu_usage">-</h4>
+                                                        <small class="text-muted">CPU Usage</small>
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="text-center">
+                                                        <h4 class="text-success" id="detail_memory_usage">-</h4>
+                                                        <small class="text-muted">Memory Usage</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="row mb-3">
+                                                <div class="col-6">
+                                                    <div class="text-center">
+                                                        <h4 class="text-warning" id="detail_disk_usage">-</h4>
+                                                        <small class="text-muted">Disk Usage</small>
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="text-center">
+                                                        <h4 class="text-info" id="detail_process_memory">-</h4>
+                                                        <small class="text-muted">Process Memory</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Service Metrics -->
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-success text-white">
+                                            <h6 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Service Metrics</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row mb-3">
+                                                <div class="col-6">
+                                                    <div class="text-center">
+                                                        <h4 class="text-primary" id="detail_total_requests">-</h4>
+                                                        <small class="text-muted">Total Requests</small>
+                                                    </div>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="text-center">
+                                                        <h4 class="text-success" id="detail_avg_response_time">-</h4>
+                                                        <small class="text-muted">Avg Response Time</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="row mb-3">
+                                                <div class="col-12">
+                                                    <div class="text-center">
+                                                        <h4 class="text-info" id="detail_uptime">-</h4>
+                                                        <small class="text-muted">Service Uptime</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Progress Bars for Visual Representation -->
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Resource Usage Visualization</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row">
+                                                <div class="col-md-3">
+                                                    <div class="mb-3">
+                                                        <div class="d-flex justify-content-between mb-1">
+                                                            <span class="text-muted">CPU Usage</span>
+                                                            <span id="detail_cpu_usage_badge" class="badge bg-primary">-</span>
+                                                        </div>
+                                                        <div class="progress" style="height: 8px;">
+                                                            <div class="progress-bar bg-primary" role="progressbar" id="detail_cpu_progress" style="width: 0%"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <div class="mb-3">
+                                                        <div class="d-flex justify-content-between mb-1">
+                                                            <span class="text-muted">Memory Usage</span>
+                                                            <span id="detail_memory_usage_badge" class="badge bg-success">-</span>
+                                                        </div>
+                                                        <div class="progress" style="height: 8px;">
+                                                            <div class="progress-bar bg-success" role="progressbar" id="detail_memory_progress" style="width: 0%"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <div class="mb-3">
+                                                        <div class="d-flex justify-content-between mb-1">
+                                                            <span class="text-muted">Disk Usage</span>
+                                                            <span id="detail_disk_usage_badge" class="badge bg-warning">-</span>
+                                                        </div>
+                                                        <div class="progress" style="height: 8px;">
+                                                            <div class="progress-bar bg-warning" role="progressbar" id="detail_disk_progress" style="width: 0%"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <div class="mb-3">
+                                                        <div class="d-flex justify-content-between mb-1">
+                                                            <span class="text-muted">Service Health</span>
+                                                            <span id="detail_health_badge" class="badge bg-success">-</span>
+                                                        </div>
+                                                        <div class="progress" style="height: 8px;">
+                                                            <div class="progress-bar bg-success" role="progressbar" id="detail_health_progress" style="width: 100%"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pods Tab -->
+                        <div class="tab-pane fade" id="pods" role="tabpanel">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0"><i class="fas fa-server me-2"></i>Pod Information</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div id="detail_pod_info">
+                                        <div class="text-center text-muted">
+                                            <i class="fas fa-spinner fa-spin me-2"></i>Loading pod information...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit Service Modal -->
     <div class="modal fade" id="editServiceModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -1259,34 +1727,53 @@
 
         // Load services on page load
         document.addEventListener('DOMContentLoaded', function() {
-            // Restore token from localStorage if available
-            restoreToken();
-            loadServices();
+            // Try to load services from cache first, then from API
+            loadServicesFromCache();
         });
+
+        // Load services from cache first, then API
+        function loadServicesFromCache() {
+            const cachedServices = loadServicesFromStorage();
+            if (cachedServices && cachedServices.length > 0) {
+                console.log('Loading services from cache...');
+                currentServices = cachedServices;
+                renderServices();
+                updateStats();
+                showToast('Services loaded from cache. Refreshing...', 'info');
+            }
+            // Always try to load fresh data from API
+            loadServices();
+        }
 
         // Load services from API
         async function loadServices() {
             try {
                 let url = '/api/services';
-                // Add token if available
-                if (window.dashboardToken) {
-                    url += `?token=${encodeURIComponent(window.dashboardToken)}`;
-                }
                 
+                console.log('Loading services from:', url);
                 const response = await fetch(url);
+                console.log('Response status:', response.status);
+                
                 const data = await response.json();
+                console.log('Response data:', data);
                 
                 if (response.ok) {
                     currentServices = data.services || [];
+                    console.log('Services loaded:', currentServices.length);
+                    // Save to localStorage for caching
+                    saveServicesToStorage(currentServices);
                     renderServices();
                     updateStats();
+                    return Promise.resolve(); // Explicitly return resolved promise
                 } else {
                     console.error('Error loading services:', data.error);
                     showToast(`Failed to load services: ${data.error || 'Unknown error'}`, 'error');
+                    return Promise.reject(new Error(data.error || 'Unknown error'));
                 }
             } catch (error) {
                 console.error('Error loading services:', error);
-                showToast('Failed to load services. Please check your GitHub token.', 'error');
+                showToast('Failed to load services.', 'error');
+                return Promise.reject(error);
             }
         }
 
@@ -1463,16 +1950,39 @@
         function showToast(message, type = 'success') {
             const toastContainer = document.getElementById('toast-container') || createToastContainer();
             
+            // Determine text color and icon based on type
+            let textColor = 'text-white';
+            let icon = 'check-circle';
+            let bgClass = `bg-${type}`;
+            
+            if (type === 'error' || type === 'danger') {
+                textColor = 'text-dark';
+                icon = 'exclamation-triangle';
+                bgClass = 'bg-danger';
+            } else if (type === 'warning') {
+                textColor = 'text-dark';
+                icon = 'exclamation-triangle';
+                bgClass = 'bg-warning';
+            } else if (type === 'info') {
+                textColor = 'text-white';
+                icon = 'info-circle';
+                bgClass = 'bg-info';
+            } else if (type === 'success') {
+                textColor = 'text-white';
+                icon = 'check-circle';
+                bgClass = 'bg-success';
+            }
+            
             const toast = document.createElement('div');
-            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            toast.className = `toast align-items-center ${textColor} ${bgClass} border-0`;
             toast.setAttribute('role', 'alert');
             toast.innerHTML = `
                 <div class="d-flex">
                     <div class="toast-body">
-                        <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i>
+                        <i class="fas fa-${icon} me-2"></i>
                         ${message}
                     </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    <button type="button" class="btn-close ${type === 'error' || type === 'danger' || type === 'warning' ? 'btn-close' : 'btn-close-white'} me-2 m-auto" data-bs-dismiss="toast"></button>
                 </div>
             `;
             
@@ -1586,7 +2096,7 @@
                     showToast(`Error restarting service: ${error.error}`, 'danger');
                 }
             } catch (error) {
-                showToast(`Error: ${error.message}`, 'danger');
+                showToast(`Error: ${error.message}`, 'error');
             } finally {
                 button.innerHTML = originalText;
                 button.disabled = false;
@@ -1676,10 +2186,10 @@
                     loadServices();
                 } else {
                     const error = await response.json();
-                    showToast(`Error deleting service: ${error.error}`, 'danger');
+                    showToast(`Error deleting service: ${error.error}`, 'error');
                 }
             } catch (error) {
-                showToast(`Error: ${error.message}`, 'danger');
+                showToast(`Error: ${error.message}`, 'error');
             } finally {
                 button.innerHTML = originalText;
                 button.disabled = false;
@@ -1689,10 +2199,245 @@
         // Modal action functions
         function viewServiceDetails() {
             if (selectedService) {
-                viewService(selectedService);
+                const service = currentServices.find(s => s.name === selectedService);
+                if (service) {
+                    // Populate the details modal
+                    populateServiceDetails(service);
+                    // Show the details modal
+                    const modal = new bootstrap.Modal(document.getElementById('serviceDetailsModal'));
+                    modal.show();
+                }
                 bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
             }
         }
+
+        // Populate service details modal
+        function populateServiceDetails(service) {
+            // Basic Information
+            document.getElementById('detail_service_name').textContent = service.name || 'N/A';
+            document.getElementById('detail_description').textContent = service.description || 'No description available';
+            document.getElementById('detail_port').textContent = service.port || 'N/A';
+            document.getElementById('detail_namespace').textContent = service.namespace || 'N/A';
+            document.getElementById('detail_source').textContent = service.source || 'N/A';
+            
+            // Status Information
+            const statusElement = document.getElementById('detail_status');
+            const status = service.status || 'Unknown';
+            statusElement.textContent = status;
+            statusElement.className = `badge ${getStatusBadgeClass(status)}`;
+            
+            // Overview tab details
+            document.getElementById('detail_service_name_overview').textContent = service.name || 'N/A';
+            document.getElementById('detail_description_overview').textContent = service.description || 'No description available';
+            document.getElementById('detail_port_overview').textContent = service.port || 'N/A';
+            document.getElementById('detail_namespace_overview').textContent = service.namespace || 'N/A';
+            
+            // Kubernetes Information
+            document.getElementById('detail_replicas').textContent = service.replicas || 'N/A';
+            
+            // CPU Resources
+            document.getElementById('detail_cpu_request').textContent = service.cpu_request || 'N/A';
+            document.getElementById('detail_cpu_limit').textContent = service.cpu_limit || 'N/A';
+            document.getElementById('detail_cpu_request_table').textContent = service.cpu_request || 'N/A';
+            document.getElementById('detail_cpu_limit_table').textContent = service.cpu_limit || 'N/A';
+            
+            // Memory Resources
+            document.getElementById('detail_memory_request').textContent = service.memory_request || 'N/A';
+            document.getElementById('detail_memory_limit').textContent = service.memory_limit || 'N/A';
+            document.getElementById('detail_memory_request_table').textContent = service.memory_request || 'N/A';
+            document.getElementById('detail_memory_limit_table').textContent = service.memory_limit || 'N/A';
+            
+            // Update status badges
+            const cpuStatus = (service.cpu_request && service.cpu_request !== 'N/A') ? 'Configured' : 'Not Set';
+            const memoryStatus = (service.memory_request && service.memory_request !== 'N/A') ? 'Configured' : 'Not Set';
+            
+            document.getElementById('detail_cpu_status').textContent = cpuStatus;
+            document.getElementById('detail_cpu_status').className = cpuStatus === 'Configured' ? 'badge bg-success' : 'badge bg-warning';
+            
+            document.getElementById('detail_memory_status').textContent = memoryStatus;
+            document.getElementById('detail_memory_status').className = memoryStatus === 'Configured' ? 'badge bg-success' : 'badge bg-warning';
+            
+            // Real-time Metrics
+            document.getElementById('detail_cpu_usage').textContent = service.cpu_usage || 'N/A';
+            document.getElementById('detail_memory_usage').textContent = service.memory_usage || 'N/A';
+            document.getElementById('detail_disk_usage').textContent = service.disk_usage || 'N/A';
+            document.getElementById('detail_process_memory').textContent = service.process_memory || 'N/A';
+            document.getElementById('detail_total_requests').textContent = service.total_requests || 'N/A';
+            document.getElementById('detail_avg_response_time').textContent = service.avg_response_time || 'N/A';
+            document.getElementById('detail_uptime').textContent = service.uptime || 'N/A';
+            
+            // Update progress bars and badges
+            updateProgressBars(service);
+            
+            // Check if metrics are available (not N/A)
+            const hasMetrics = service.cpu_usage !== 'N/A' && service.memory_usage !== 'N/A';
+            updateMetricsStatus(hasMetrics);
+            
+            // Port-forward is handled automatically by backend
+            
+            // Repository Information
+            const repoALink = document.getElementById('detail_repo_a');
+            const repoBLink = document.getElementById('detail_repo_b');
+            if (service.repo_a) {
+                repoALink.href = `https://github.com/${service.repo_a}`;
+                repoALink.textContent = service.repo_a;
+            } else {
+                repoALink.href = '#';
+                repoALink.textContent = 'N/A';
+            }
+            
+            if (service.repo_b) {
+                repoBLink.href = `https://github.com/${service.repo_b}`;
+                repoBLink.textContent = service.repo_b;
+            } else {
+                repoBLink.href = '#';
+                repoBLink.textContent = 'N/A';
+            }
+            
+            document.getElementById('detail_image').textContent = service.image || 'N/A';
+            
+            // Timestamps
+            document.getElementById('detail_created').textContent = service.created_at ? new Date(service.created_at).toLocaleString() : 'N/A';
+            document.getElementById('detail_updated').textContent = service.updated_at ? new Date(service.updated_at).toLocaleString() : 'N/A';
+            
+            // Health Check
+            const healthUrl = document.getElementById('detail_health_url');
+            if (service.health_url) {
+                healthUrl.href = service.health_url;
+                healthUrl.style.display = 'block';
+            } else {
+                healthUrl.style.display = 'none';
+            }
+            
+            // Pod Information
+            const podInfo = document.getElementById('detail_pod_info');
+            if (service.pods && service.pods.length > 0) {
+                podInfo.innerHTML = '';
+                service.pods.forEach(pod => {
+                    const podElement = document.createElement('div');
+                    podElement.className = 'mb-2 p-2 border rounded';
+                    podElement.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span><strong>${pod.name}</strong></span>
+                            <span class="badge ${getStatusBadgeClass(pod.status)}">${pod.status}</span>
+                        </div>
+                        <small class="text-muted">Node: ${pod.node || 'N/A'}</small>
+                    `;
+                    podInfo.appendChild(podElement);
+                });
+            } else {
+                podInfo.innerHTML = '<div class="text-center text-muted">No pod information available</div>';
+            }
+        }
+
+        // Get badge class for status
+        function getStatusBadgeClass(status) {
+            switch (status.toLowerCase()) {
+                case 'running':
+                case 'active':
+                case 'healthy':
+                    return 'bg-success';
+                case 'pending':
+                case 'progressing':
+                    return 'bg-warning';
+                case 'failed':
+                case 'error':
+                case 'degraded':
+                    return 'bg-danger';
+                case 'stopped':
+                case 'terminated':
+                    return 'bg-secondary';
+                default:
+                    return 'bg-info';
+            }
+        }
+
+        // Update progress bars for real-time metrics
+        function updateProgressBars(service) {
+            // CPU Usage
+            const cpuUsage = parseFloat(service.cpu_usage?.replace('%', '') || '0');
+            document.getElementById('detail_cpu_usage_badge').textContent = service.cpu_usage || 'N/A';
+            document.getElementById('detail_cpu_progress').style.width = `${Math.min(cpuUsage, 100)}%`;
+            document.getElementById('detail_cpu_progress').className = `progress-bar ${getUsageColor(cpuUsage)}`;
+            
+            // Memory Usage - Calculate based on limit if available
+            const memoryUsage = parseFloat(service.memory_usage?.replace('%', '') || '0');
+            const processMemory = service.process_memory || 'N/A';
+            const memoryLimit = service.memory_limit || 'N/A';
+            
+            // Calculate percentage based on limit if possible
+            let memoryPercentage = memoryUsage;
+            let memoryDisplay = service.memory_usage || 'N/A';
+            
+            if (processMemory !== 'N/A' && memoryLimit !== 'N/A') {
+                try {
+                    const usedMB = parseFloat(processMemory.replace(' MB', ''));
+                    const limitMB = parseMemoryLimit(memoryLimit);
+                    if (limitMB > 0) {
+                        const limitPercentage = (usedMB / limitMB) * 100;
+                        memoryPercentage = Math.min(limitPercentage, 100);
+                        memoryDisplay = `${memoryPercentage.toFixed(1)}% of limit`;
+                    }
+                } catch (e) {
+                    console.log('Could not calculate memory percentage based on limit');
+                }
+            }
+            
+            document.getElementById('detail_memory_usage_badge').textContent = memoryDisplay;
+            document.getElementById('detail_memory_progress').style.width = `${Math.min(memoryPercentage, 100)}%`;
+            document.getElementById('detail_memory_progress').className = `progress-bar ${getUsageColor(memoryPercentage)}`;
+            
+            // Disk Usage
+            const diskUsage = parseFloat(service.disk_usage?.replace('%', '') || '0');
+            document.getElementById('detail_disk_usage_badge').textContent = service.disk_usage || 'N/A';
+            document.getElementById('detail_disk_progress').style.width = `${Math.min(diskUsage, 100)}%`;
+            document.getElementById('detail_disk_progress').className = `progress-bar ${getUsageColor(diskUsage)}`;
+            
+            // Service Health
+            const healthStatus = service.health_status || 'Unknown';
+            document.getElementById('detail_health_badge').textContent = healthStatus;
+            document.getElementById('detail_health_badge').className = `badge ${getStatusBadgeClass(healthStatus)}`;
+            
+            const healthProgress = healthStatus === 'Healthy' ? 100 : (healthStatus === 'Degraded' ? 50 : 0);
+            document.getElementById('detail_health_progress').style.width = `${healthProgress}%`;
+            document.getElementById('detail_health_progress').className = `progress-bar ${getUsageColor(healthProgress)}`;
+        }
+
+        // Parse memory limit to MB
+        function parseMemoryLimit(limit) {
+            if (limit.includes('Gi')) {
+                return parseFloat(limit.replace('Gi', '')) * 1024;
+            } else if (limit.includes('Mi')) {
+                return parseFloat(limit.replace('Mi', ''));
+            } else if (limit.includes('G')) {
+                return parseFloat(limit.replace('G', '')) * 1024;
+            } else if (limit.includes('M')) {
+                return parseFloat(limit.replace('M', ''));
+            }
+            return 0;
+        }
+
+        // Get color based on usage percentage
+        function getUsageColor(usage) {
+            if (usage >= 90) return 'bg-danger';
+            if (usage >= 70) return 'bg-warning';
+            if (usage >= 50) return 'bg-info';
+            return 'bg-success';
+        }
+
+        // Update metrics status indicator
+        function updateMetricsStatus(hasMetrics) {
+            const statusElement = document.getElementById('detail_health_badge');
+            if (hasMetrics) {
+                statusElement.textContent = 'Connected';
+                statusElement.className = 'badge bg-success';
+            } else {
+                statusElement.textContent = 'Disconnected';
+                statusElement.className = 'badge bg-warning';
+            }
+        }
+
+        // Port-forward is now handled automatically by backend
 
         function restartService() {
             if (selectedService) {
@@ -1742,10 +2487,10 @@
                         loadServices(); // Reload the list
                     } else {
                         const error = await response.json();
-                        showToast(`Error: ${error.error}`, 'danger');
+                        showToast(`Error: ${error.error}`, 'error');
                     }
                 } catch (error) {
-                    showToast(`Error syncing services: ${error.message}`, 'danger');
+                    showToast(`Error syncing services: ${error.message}`, 'error');
                 } finally {
                     button.innerHTML = originalText;
                     button.disabled = false;
@@ -1753,97 +2498,120 @@
             }
         }
 
-        // Save token to localStorage
-        function saveToken(token) {
+
+        // Save services to localStorage
+        function saveServicesToStorage(services) {
             try {
-                localStorage.setItem('github_dashboard_token', token);
+                localStorage.setItem('dashboard_services_cache', JSON.stringify(services));
+                localStorage.setItem('dashboard_services_timestamp', Date.now().toString());
             } catch (error) {
-                console.warn('Could not save token to localStorage:', error);
-            }
-        }
-        
-        // Load token from localStorage
-        function loadToken() {
-            try {
-                return localStorage.getItem('github_dashboard_token') || '';
-            } catch (error) {
-                console.warn('Could not load token from localStorage:', error);
-                return '';
-            }
-        }
-        
-        // Clear token from localStorage
-        function clearToken() {
-            try {
-                localStorage.removeItem('github_dashboard_token');
-            } catch (error) {
-                console.warn('Could not clear token from localStorage:', error);
-            }
-        }
-        
-        // Restore token on page load
-        function restoreToken() {
-            const savedToken = loadToken();
-            if (savedToken) {
-                const tokenInput = document.getElementById('githubTokenInput');
-                tokenInput.value = savedToken;
-                window.dashboardToken = savedToken;
-                // Note: No toast message on page load to avoid notification spam
-                console.log('GitHub token restored from previous session');
+                console.warn('Could not save services to localStorage:', error);
             }
         }
 
-        // Apply GitHub token for API calls
-        async function applyGitHubToken() {
-            const tokenInput = document.getElementById('githubTokenInput');
-            const token = tokenInput.value.trim();
-            
-            if (!token) {
-                showToast('Please enter a GitHub token', 'warning');
-                return;
-            }
-            
+        // Load services from localStorage
+        function loadServicesFromStorage() {
             try {
-                // Validate token
-                const response = await fetch('/api/dashboard/set-token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ token: token })
-                });
+                const cached = localStorage.getItem('dashboard_services_cache');
+                const timestamp = localStorage.getItem('dashboard_services_timestamp');
                 
-                if (response.ok) {
-                    showToast('GitHub token applied successfully!', 'success');
-                    // Store token for future API calls
-                    window.dashboardToken = token;
-                    // Save token to localStorage for persistence
-                    saveToken(token);
-                    // Reload services with new token
-                    loadServices();
-                } else {
-                    const error = await response.json();
-                    showToast(`Invalid token: ${error.error}`, 'error');
-                    // Clear invalid token from storage
-                    clearToken();
+                if (cached && timestamp) {
+                    const cacheAge = Date.now() - parseInt(timestamp);
+                    // Cache valid for 5 minutes
+                    if (cacheAge < 5 * 60 * 1000) {
+                        return JSON.parse(cached);
+                    }
                 }
+                return null;
             } catch (error) {
-                showToast('Failed to validate token', 'error');
-                clearToken();
+                console.warn('Could not load services from localStorage:', error);
+                return null;
+            }
+        }
+        
+
+        // Loading progress functions
+        function showLoadingProgress(message, progress) {
+            // Remove existing progress modal if any
+            const existingModal = document.getElementById('loadingProgressModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            const modalHtml = `
+                <div class="modal fade" id="loadingProgressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-body text-center py-4">
+                                <div class="mb-4">
+                                    <i class="fas fa-cog fa-spin text-primary" style="font-size: 3rem;"></i>
+                                </div>
+                                <h5 class="mb-3" id="loading-progress-message">${message}</h5>
+                                <div class="progress mb-3" style="height: 8px;">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                         role="progressbar" id="loading-progress-bar" 
+                                         style="width: ${progress}%" aria-valuenow="${progress}" 
+                                         aria-valuemin="0" aria-valuemax="100">
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <small class="text-muted">Processing...</small>
+                                    <small class="text-muted" id="loading-progress-percent">${progress}%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            const modal = new bootstrap.Modal(document.getElementById('loadingProgressModal'));
+            modal.show();
+            
+            // Start fallback timer
+            forceHideLoadingProgress();
+        }
+
+        function updateLoadingProgress(message, progress) {
+            const messageEl = document.getElementById('loading-progress-message');
+            const progressBar = document.getElementById('loading-progress-bar');
+            const percentEl = document.getElementById('loading-progress-percent');
+            
+            if (messageEl) messageEl.textContent = message;
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+                progressBar.setAttribute('aria-valuenow', progress);
+            }
+            if (percentEl) percentEl.textContent = `${progress}%`;
+        }
+
+        function hideLoadingProgress() {
+            const modal = document.getElementById('loadingProgressModal');
+            if (modal) {
+                const bsModal = bootstrap.Modal.getInstance(modal);
+                if (bsModal) {
+                    bsModal.hide();
+                }
+                setTimeout(() => {
+                    if (modal && modal.parentNode) {
+                        modal.remove();
+                    }
+                }, 300);
             }
         }
 
-        // Clear saved token
-        function clearSavedToken() {
-            if (confirm('Are you sure you want to clear the saved GitHub token?')) {
-                clearToken();
-                const tokenInput = document.getElementById('githubTokenInput');
-                tokenInput.value = '';
-                window.dashboardToken = '';
-                showToast('GitHub token cleared', 'info');
-                loadServices(); // Reload services without token
-            }
+        // Force hide loading progress after 15 seconds (fallback)
+        function forceHideLoadingProgress() {
+            setTimeout(() => {
+                const modal = document.getElementById('loadingProgressModal');
+                if (modal) {
+                    console.warn('Force hiding loading progress after timeout');
+                    hideLoadingProgress();
+                }
+            }, 15000);
         }
+        
+        // Token features removed (Mongo-backed)
 
         // Edit service function
         function editService() {
