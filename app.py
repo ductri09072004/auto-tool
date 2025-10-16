@@ -1428,68 +1428,24 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                 template_b = fallback
             else:
                 return {'success': False, 'error': f'Template B not found: {template_b}'}
-        # Create services/{SERVICE_NAME}/k8s structure
-        services_dir = os.path.join(clone_dir, 'services')
-        service_dir = os.path.join(services_dir, service_name)
-        target_path = os.path.join(service_dir, 'k8s')
-        # Ensure a clean directory to avoid stale files with old hardcoded names
-        if os.path.isdir(target_path):
-            shutil.rmtree(target_path, ignore_errors=True)
-        os.makedirs(target_path, exist_ok=True)
-        shutil.copytree(template_b, target_path, dirs_exist_ok=True)
-
-        # Replace placeholders in all files under target_path
-        repl = {
-            '{SERVICE_NAME}': service_name,
-            '{NAMESPACE}': namespace,
-            '{GH_OWNER}': gh_owner,
-            '{REPO_A}': repo_a_name,
-            '{IMAGE_TAG}': image_tag,
-            '{CONTAINER_PORT}': str(container_port),
-            '{SERVICE_PORT}': str(service_port),
-            '{HEALTH_PATH}': health_path,
-            '{DOMAIN}': domain,
-            '{BASE_PATH}': base_path,
-            '{REPLICAS}': str(replicas),
-            '{MIN_REPLICAS}': str(min_replicas),
-            '{MAX_REPLICAS}': str(max_replicas),
-            '{CPU_REQUEST}': cpu_request,
-            '{CPU_LIMIT}': cpu_limit,
-            '{MEMORY_REQUEST}': memory_request,
-            '{MEMORY_LIMIT}': memory_limit,
-            '{PORT}': str(container_port),
-            '{TIMESTAMP}': timestamp,
-            # Backward-compat: replace legacy hardcoded names if encountered
-            'demo-fiss': namespace,
-            'demo-fiss-api': service_name,
-            'demo-fiss-service': f'{service_name}-service',
-            'demo-fiss-config': f'{namespace}-config',
-            'demo-fiss-ingress': f'{service_name}-ingress',
-            'demo-fiss-hpa': f'{service_name}-hpa',
-        }
-
-        for root, _, files in os.walk(target_path):
-            for file in files:
-                if not file.endswith(('.yaml', '.yml', '.py')):
-                    continue
-                p = os.path.join(root, file)
-                with open(p, 'r', encoding='utf-8') as rf:
-                    content = rf.read()
-                for k, v in repl.items():
-                    content = content.replace(k, v)
-                with open(p, 'w', encoding='utf-8') as wf:
-                    wf.write(content)
-
-        # Create Grafana dashboard folder and files
-        grafana_dir = os.path.join(service_dir, 'grafana')
-        os.makedirs(grafana_dir, exist_ok=True)
+        # Skip creating services/{SERVICE_NAME}/k8s structure - plugin will render from MongoDB
+        # No need to create YAML files in Repo B anymore
+        print(f"INFO: Skipping YAML file creation for {service_name} - plugin will render from MongoDB")
         
+        # No need to replace placeholders since we're not creating YAML files
+        # Plugin will render YAML from MongoDB with correct values
+
+        # Create Grafana dashboard folder and files (skip since we're not creating service folders)
+        # grafana_dir = os.path.join(service_dir, 'grafana')
+        # os.makedirs(grafana_dir, exist_ok=True)
+        
+        # Skip Grafana dashboard creation since we're not creating service folders
         # Use provided port from service_data
-        service_port = int(service_data.get('port'))
-        if not service_port:
-            return {'success': False, 'error': 'Port is required in service_data'}
+        # service_port = int(service_data.get('port'))
+        # if not service_port:
+        #     return {'success': False, 'error': 'Port is required in service_data'}
         
-        # Create dashboard.json
+        # Create dashboard.json (commented out)
         dashboard_content = f"""{{
   "dashboard": {{
     "id": null,
@@ -1579,12 +1535,14 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
   }}
 }}"""
         
-        dashboard_file = os.path.join(grafana_dir, 'dashboard.json')
-        with open(dashboard_file, 'w', encoding='utf-8') as f:
-            f.write(dashboard_content)
+        # Skip dashboard file creation since we're not creating service folders
+        # dashboard_file = os.path.join(grafana_dir, 'dashboard.json')
+        # with open(dashboard_file, 'w', encoding='utf-8') as f:
+        #     f.write(dashboard_content)
         
+        # Skip import script creation since we're not creating service folders
         # Create import_dashboard.ps1
-        import_script_content = f'''# Script import dashboard cho {service_name}
+        # import_script_content = f'''# Script import dashboard cho {service_name}
 param(
     [string]$GrafanaUrl = "http://localhost:3000",
     [string]$Username = "admin",
@@ -1660,92 +1618,104 @@ if ($result) {{
 
 Write-Host "Dashboard import completed for {service_name}!" -ForegroundColor Green'''
         
-        import_script_file = os.path.join(grafana_dir, 'import_dashboard.ps1')
-        with open(import_script_file, 'w', encoding='utf-8') as f:
-            f.write(import_script_content)
+        # Skip import script file creation since we're not creating service folders
+        # import_script_file = os.path.join(grafana_dir, 'import_dashboard.ps1')
+        # with open(import_script_file, 'w', encoding='utf-8') as f:
+        #     f.write(import_script_content)
         
+        # Skip auto-configure Prometheus and import Grafana dashboard since we're not creating service folders
         # Auto-configure Prometheus and import Grafana dashboard
-        try:
-            # Use provided port from service_data
-            service_port = int(service_data.get('port'))
-            if not service_port:
-                return {'success': False, 'error': 'Port is required in service_data'}
-            
-            # Add Prometheus scrape job
-            prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
-            
-            # Import Grafana dashboard
-            grafana_dashboard_imported = import_grafana_dashboard(service_name, grafana_dir)
-            
-            # Store results for return
-            prometheus_result = "✅ Prometheus configured" if prometheus_config_added else "❌ Prometheus config failed"
-            grafana_result = "✅ Grafana dashboard imported" if grafana_dashboard_imported else "❌ Grafana import failed"
-            
-        except Exception as e:
-            prometheus_result = f"❌ Prometheus error: {str(e)}"
-            grafana_result = f"❌ Grafana error: {str(e)}"
+        # try:
+        #     # Use provided port from service_data
+        #     service_port = int(service_data.get('port'))
+        #     if not service_port:
+        #         return {'success': False, 'error': 'Port is required in service_data'}
+        #     
+        #     # Add Prometheus scrape job
+        #     prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
+        #     
+        #     # Import Grafana dashboard
+        #     grafana_dashboard_imported = import_grafana_dashboard(service_name, grafana_dir)
+        #     
+        #     # Store results for return
+        #     prometheus_result = "✅ Prometheus configured" if prometheus_config_added else "❌ Prometheus config failed"
+        #     grafana_result = "✅ Grafana dashboard imported" if grafana_dashboard_imported else "❌ Grafana import failed"
+        #     
+        # except Exception as e:
+        #     prometheus_result = f"❌ Prometheus error: {str(e)}"
+        #     grafana_result = f"❌ Grafana error: {str(e)}"
+        
+        # Set default results since we're skipping monitoring setup
+        prometheus_result = "⏭️ Skipped (no files created)"
+        grafana_result = "⏭️ Skipped (no files created)"
 
+        # Skip creating ArgoCD Application since plugin will handle it
         # Create ArgoCD Application
-        apps_dir = os.path.join(clone_dir, 'apps')
-        os.makedirs(apps_dir, exist_ok=True)
-        app_file = os.path.join(apps_dir, f'{service_name}-application.yaml')
+        # apps_dir = os.path.join(clone_dir, 'apps')
+        # os.makedirs(apps_dir, exist_ok=True)
+        # app_file = os.path.join(apps_dir, f'{service_name}-application.yaml')
         
-        app_content = f"""apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: {service_name}
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: {repo_b_url.replace('.git', '')}
-    targetRevision: HEAD
-    path: services/{service_name}/k8s
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: {namespace}
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-    - CreateNamespace=true
-    - PrunePropagationPolicy=foreground
-    - PruneLast=true
-    - RespectIgnoreDifferences=true
-    - ServerSideApply=true
-    retry:
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
-      limit: 5
-  revisionHistoryLimit: 3
-"""
-        
-        with open(app_file, 'w', encoding='utf-8') as f:
-            f.write(app_content)
+        # Skip all file creation and git operations since we're not creating files anymore
+        # app_content = f"""apiVersion: argoproj.io/v1alpha1
+        # kind: Application
+        # metadata:
+        #   name: {service_name}
+        #   namespace: argocd
+        #   finalizers:
+        #     - resources-finalizer.argocd.argoproj.io
+        # spec:
+        #   project: default
+        #   source:
+        #     repoURL: {repo_b_url.replace('.git', '')}
+        #     targetRevision: HEAD
+        #     path: services/{service_name}/k8s
+        #   destination:
+        #     server: https://kubernetes.default.svc
+        #     namespace: {namespace}
+        #   syncPolicy:
+        #     automated:
+        #       prune: true
+        #       selfHeal: true
+        #     syncOptions:
+        #     - CreateNamespace=true
+        #     - PrunePropagationPolicy=foreground
+        #     - PruneLast=true
+        #     - RespectIgnoreDifferences=true
+        #     - ServerSideApply=true
+        #     retry:
+        #       backoff:
+        #         duration: 5s
+        #         factor: 2
+        #         maxDuration: 3m
+        #       limit: 5
+        #   revisionHistoryLimit: 3
+        # """
+        # 
+        # with open(app_file, 'w', encoding='utf-8') as f:
+        #     f.write(app_content)
 
+        # Skip git operations since we're not creating files
         # Commit and push manifests to Repo B first
-        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-        if st.stdout.strip():
-            subprocess.run(['git', 'commit', '-m', f'Add/Update manifests for {service_name}'], cwd=clone_dir, check=True)
-        push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
-        if push_proc.returncode != 0:
-            return {'success': False, 'error': push_proc.stderr}
+        # subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+        # subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+        # subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+        # st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+        # if st.stdout.strip():
+        #     subprocess.run(['git', 'commit', '-m', f'Add/Update manifests for {service_name}'], cwd=clone_dir, check=True)
+        # push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
+        # if push_proc.returncode != 0:
+        #     return {'success': False, 'error': push_proc.stderr}
 
+        # Skip ArgoCD Application deployment since plugin will handle it
         # Auto-deploy ArgoCD Application after successful push
-        try:
-            subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
-            print(f"✅ ArgoCD Application '{service_name}' deployed successfully")
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️  ArgoCD Application deploy failed: {e.stderr.decode()}")
-            # Continue anyway - user can apply manually
+        # try:
+        #     subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
+        #     print(f"✅ ArgoCD Application '{service_name}' deployed successfully")
+        # except subprocess.CalledProcessError as e:
+        #     print(f"⚠️  ArgoCD Application deploy failed: {e.stderr.decode()}")
+        #     # Continue anyway - user can apply manually
+        
+        print(f"✅ Service '{service_name}' configuration saved to MongoDB - plugin will handle deployment")
 
         return {
             'success': True,
