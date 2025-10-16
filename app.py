@@ -80,9 +80,6 @@ def add_no_cache_headers(response):
 
 # Monitoring configuration
 PROMETHEUS_URL = "http://localhost:9090"
-GRAFANA_URL = "http://localhost:3000"
-GRAFANA_USER = "admin"
-GRAFANA_PASS = "admin123"
 GITHUB_ORG = os.getenv('GITHUB_ORG', 'your_organization')
 DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri09072004/demo_fiss1_B')
 
@@ -182,36 +179,6 @@ def add_prometheus_scrape_job(service_name, service_port):
         print(f"Error adding Prometheus job: {e}")
         return False
 
-def import_grafana_dashboard(service_name, grafana_dir):
-    """Import Grafana dashboard for new service"""
-    try:
-        # Read dashboard JSON
-        dashboard_file = os.path.join(grafana_dir, 'dashboard.json')
-        if not os.path.exists(dashboard_file):
-            print(f"Dashboard file not found: {dashboard_file}")
-            return False
-            
-        with open(dashboard_file, 'r', encoding='utf-8') as f:
-            dashboard_data = json.load(f)
-        
-        # Delete existing dashboard if exists
-        headers = {
-            'Authorization': f'Basic {requests.auth._basic_auth_str(GRAFANA_USER, GRAFANA_PASS)}',
-            'Content-Type': 'application/json'
-        }
-        
-        delete_url = f"{GRAFANA_URL}/api/dashboards/uid/{service_name}"
-        requests.delete(delete_url, headers=headers)
-        
-        # Import dashboard
-        import_url = f"{GRAFANA_URL}/api/dashboards/db"
-        import_response = requests.post(import_url, headers=headers, json=dashboard_data)
-        
-        return import_response.status_code in [200, 201]
-        
-    except Exception as e:
-        print(f"Error importing Grafana dashboard: {e}")
-        return False
 
 @app.route('/')
 def index():
@@ -621,7 +588,7 @@ def delete_service(service_name):
                             headers=headers,
                             json={'message': message, 'sha': sha, 'branch': 'main'}
                         )
-                    # Known files under k8s and grafana to remove
+                    # Known files under k8s to remove
                     files_to_delete = [
                         f"services/{service_name}/k8s/deployment.yaml",
                         f"services/{service_name}/k8s/service.yaml",
@@ -632,8 +599,6 @@ def delete_service(service_name):
                         f"services/{service_name}/k8s/namespace.yaml",
                         f"services/{service_name}/k8s/secret.yaml",
                         f"services/{service_name}/k8s/argocd-application.yaml",
-                        f"services/{service_name}/grafana/dashboard.json",
-                        f"services/{service_name}/grafana/import_dashboard.ps1",
                     ]
                     for p in files_to_delete:
                         try:
@@ -1435,196 +1400,10 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # No need to replace placeholders since we're not creating YAML files
         # Plugin will render YAML from MongoDB with correct values
 
-        # Create Grafana dashboard folder and files (skip since we're not creating service folders)
-        # grafana_dir = os.path.join(service_dir, 'grafana')
-        # os.makedirs(grafana_dir, exist_ok=True)
         
-        # Skip Grafana dashboard creation since we're not creating service folders
-        # Use provided port from service_data
-        # service_port = int(service_data.get('port'))
-        # if not service_port:
-        #     return {'success': False, 'error': 'Port is required in service_data'}
         
-        # Create dashboard.json (commented out)
-        dashboard_content = f"""{{
-  "dashboard": {{
-    "id": null,
-    "uid": "{service_name}",
-    "title": "{service_name} API Dashboard",
-    "tags": [
-      "{service_name}",
-      "flask",
-      "api",
-      "microservice"
-    ],
-    "style": "dark",
-    "timezone": "browser",
-    "panels": [
-      {{
-        "id": 1,
-        "title": "API Requests & Memory",
-        "type": "barchart",
-        "targets": [
-          {{
-            "expr": "demo_fiss_memory_usage_bytes{{instance=\\"host.docker.internal:{service_port}\\"}} / 1024 / 1024",
-            "legendFormat": "Memory Usage (MB)",
-            "refId": "A"
-          }},
-          {{
-            "expr": "demo_fiss_active_connections{{instance=\\"host.docker.internal:{service_port}\\"}}",
-            "legendFormat": "Active Connections",
-            "refId": "B"
-          }}
-        ],
-        "gridPos": {{
-          "h": 8,
-          "w": 12,
-          "x": 0,
-          "y": 0
-        }}
-      }},
-      {{
-        "id": 2,
-        "title": "Response Time & Performance",
-        "type": "graph",
-        "targets": [
-          {{
-            "expr": "demo_fiss_response_time_seconds{{instance=\\"host.docker.internal:{service_port}\\"}}",
-            "legendFormat": "Response Time (s)",
-            "refId": "A"
-          }}
-        ],
-        "gridPos": {{
-          "h": 8,
-          "w": 12,
-          "x": 12,
-          "y": 0
-        }}
-      }},
-      {{
-        "id": 3,
-        "title": "Service Status & Requests",
-        "type": "barchart",
-        "targets": [
-          {{
-            "expr": "up{{instance=\\"host.docker.internal:{service_port}\\"}}",
-            "legendFormat": "{service_name} Status",
-            "refId": "A"
-          }},
-          {{
-            "expr": "demo_fiss_requests_total{{instance=\\"host.docker.internal:{service_port}\\"}}",
-            "legendFormat": "Total Requests",
-            "refId": "B"
-          }}
-        ],
-        "gridPos": {{
-          "h": 8,
-          "w": 24,
-          "x": 0,
-          "y": 8
-        }}
-      }}
-    ],
-    "time": {{
-      "from": "now-1h",
-      "to": "now"
-    }},
-    "refresh": "5s",
-    "schemaVersion": 27,
-    "version": 0
-  }}
-}}"""
-        
-        # Skip dashboard file creation since we're not creating service folders
-        # dashboard_file = os.path.join(grafana_dir, 'dashboard.json')
-        # with open(dashboard_file, 'w', encoding='utf-8') as f:
-        #     f.write(dashboard_content)
-        
-        # Skip import script creation since we're not creating service folders
-        # Create import_dashboard.ps1
-        # import_script_content = f'''# Script import dashboard cho {service_name}
-param(
-    [string]$GrafanaUrl = "http://localhost:3000",
-    [string]$Username = "admin",
-    [string]$Password = "{GRAFANA_PASS}"
-)
-
-Write-Host "=== Import Dashboard for {service_name} ===" -ForegroundColor Cyan
-
-# Function để gọi Grafana API
-function Invoke-GrafanaAPI {{
-    param(
-        [string]$Method,
-        [string]$Endpoint,
-        [string]$Body = $null
-    )
-    
-    $base64Auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${{Username}}:${{Password}}"))
-    $headers = @{{
-        "Content-Type" = "application/json"
-        "Authorization" = "Basic $base64Auth"
-    }}
-    
-    $uri = "${{GrafanaUrl}}/api${{Endpoint}}"
-    
-    try {{
-        if ($Body) {{
-            $response = Invoke-RestMethod -Uri $uri -Method $Method -Headers $headers -Body $Body
-        }} else {{
-            $response = Invoke-RestMethod -Uri $uri -Method $Method -Headers $headers
-        }}
-        return $response
-    }}
-    catch {{
-        Write-Host "API Error: $($_.Exception.Message)" -ForegroundColor Red
-        return $null
-    }}
-}}
-
-# Kiểm tra kết nối Grafana
-Write-Host "Checking Grafana connection..." -ForegroundColor Yellow
-$health = Invoke-GrafanaAPI -Method "GET" -Endpoint "/health"
-if ($health) {{
-    Write-Host "Grafana is running" -ForegroundColor Green
-}} else {{
-    Write-Host "Cannot connect to Grafana at $GrafanaUrl" -ForegroundColor Red
-    exit 1
-}}
-
-# Đọc dashboard JSON
-$dashboardFile = "dashboard.json"
-Write-Host "Reading dashboard file: $dashboardFile" -ForegroundColor Yellow
-if (-not (Test-Path $dashboardFile)) {{
-    Write-Host "Dashboard file not found: $dashboardFile" -ForegroundColor Red
-    exit 1
-}}
-
-$dashboardJson = Get-Content $dashboardFile -Raw
-$dashboard = $dashboardJson | ConvertFrom-Json
-$dashboardTitle = $dashboard.dashboard.title
-
-# Import dashboard
-Write-Host "Importing dashboard..." -ForegroundColor Yellow
-$importBody = $dashboard | ConvertTo-Json -Depth 10
-$result = Invoke-GrafanaAPI -Method "POST" -Endpoint "/dashboards/db" -Body $importBody
-
-if ($result) {{
-    Write-Host "Dashboard imported successfully!" -ForegroundColor Green
-    Write-Host "Dashboard URL: ${{GrafanaUrl}}/d/$($result.uid)" -ForegroundColor Cyan
-}} else {{
-    Write-Host "Failed to import dashboard" -ForegroundColor Red
-    exit 1
-}}
-
-Write-Host "Dashboard import completed for {service_name}!" -ForegroundColor Green'''
-        
-        # Skip import script file creation since we're not creating service folders
-        # import_script_file = os.path.join(grafana_dir, 'import_dashboard.ps1')
-        # with open(import_script_file, 'w', encoding='utf-8') as f:
-        #     f.write(import_script_content)
-        
-        # Skip auto-configure Prometheus and import Grafana dashboard since we're not creating service folders
-        # Auto-configure Prometheus and import Grafana dashboard
+        # Skip auto-configure Prometheus since we're not creating service folders
+        # Auto-configure Prometheus
         # try:
         #     # Use provided port from service_data
         #     service_port = int(service_data.get('port'))
@@ -1634,20 +1413,14 @@ Write-Host "Dashboard import completed for {service_name}!" -ForegroundColor Gre
         #     # Add Prometheus scrape job
         #     prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
         #     
-        #     # Import Grafana dashboard
-        #     grafana_dashboard_imported = import_grafana_dashboard(service_name, grafana_dir)
-        #     
         #     # Store results for return
         #     prometheus_result = "✅ Prometheus configured" if prometheus_config_added else "❌ Prometheus config failed"
-        #     grafana_result = "✅ Grafana dashboard imported" if grafana_dashboard_imported else "❌ Grafana import failed"
         #     
         # except Exception as e:
         #     prometheus_result = f"❌ Prometheus error: {str(e)}"
-        #     grafana_result = f"❌ Grafana error: {str(e)}"
         
         # Set default results since we're skipping monitoring setup
         prometheus_result = "⏭️ Skipped (no files created)"
-        grafana_result = "⏭️ Skipped (no files created)"
 
         # Skip creating ArgoCD Application since plugin will handle it
         # Create ArgoCD Application
@@ -1721,9 +1494,7 @@ Write-Host "Dashboard import completed for {service_name}!" -ForegroundColor Gre
             'success': True,
             'service_name': service_name,
             'monitoring': {
-                'prometheus': prometheus_result,
-                'grafana': grafana_result,
-                'dashboard_url': f"{GRAFANA_URL}/d/{service_name}"
+                'prometheus': prometheus_result
             }
         }
     except Exception as e:
