@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: virtual-git
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: virtual-git-config
+  namespace: virtual-git
+data:
+  MONGO_URI: "mongodb+srv://BlueDuck2:Fcsunny0907@tpexpress.zjf26.mongodb.net/?retryWrites=true&w=majority&appName=TPExpress"
+  MONGO_DB: "AutoToolDevOPS"
+  PORT: "8050"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: virtual-git-service
+  namespace: virtual-git
+  labels:
+    app: virtual-git-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: virtual-git-service
+  template:
+    metadata:
+      labels:
+        app: virtual-git-service
+    spec:
+      initContainers:
+      - name: copy-files
+        image: busybox
+        command: ['sh', '-c', 'echo "Installing dependencies and copying files..."']
+        volumeMounts:
+        - name: app-files
+          mountPath: /tmp/app
+      containers:
+      - name: virtual-git-service
+        image: python:3.11-slim
+        command: ["python", "-c", "import sys; import os; import subprocess; subprocess.run(['pip', 'install', 'flask', 'pymongo', 'pyyaml'], check=True); sys.path.append('/tmp/app'); from virtual_git_service import app; port = int(os.getenv('PORT', 8050)); app.run(host='0.0.0.0', port=port, debug=False)"]
+        ports:
+        - containerPort: 8050
+        volumeMounts:
+        - name: app-files
+          mountPath: /tmp/app
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: virtual-git-config
+              key: MONGO_URI
+        - name: MONGO_DB
+          valueFrom:
+            configMapKeyRef:
+              name: virtual-git-config
+              key: MONGO_DB
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: virtual-git-config
+              key: PORT
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8050
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8050
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: app-files
+        configMap:
+          name: virtual-git-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: virtual-git-service
+  namespace: virtual-git
+  labels:
+    app: virtual-git-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8050
+    targetPort: 8050
+    protocol: TCP
+  selector:
+    app: virtual-git-service
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: virtual-git-ingress
+  namespace: virtual-git
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: virtual-git.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: virtual-git-service
+            port:
+              number: 8050

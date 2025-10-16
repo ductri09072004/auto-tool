@@ -350,26 +350,8 @@ def update_service(service_name):
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
-        # Update service configuration in MongoDB first
-        service_data = {
-            'name': service_name,
-            'description': data['description'],
-            'replicas': int(data['replicas']),
-            'min_replicas': int(data['min_replicas']),
-            'max_replicas': int(data['max_replicas']),
-            'cpu_request': data['cpu_request'],
-            'cpu_limit': data['cpu_limit'],
-            'memory_request': data['memory_request'],
-            'memory_limit': data['memory_limit'],
-            'updated_at': datetime.now().isoformat()
-        }
-        
-        # Update in MongoDB
-        if not service_manager.add_service_complete(service_data):
-            return jsonify({'error': 'Failed to update service in MongoDB'}), 500
-        
-        # Update service configuration in repository (create temp YAML, sync, delete)
-        result = update_service_config_with_temp_yaml(service_name, data, github_token)
+        # Update service configuration in repository
+        result = update_service_config(service_name, data, github_token)
         
         if result['success']:
             return jsonify({
@@ -1250,18 +1232,12 @@ jobs:
         f.write(workflow_content)
 
 
-def update_service_config_with_temp_yaml(service_name: str, config_data: dict, github_token: str):
-    """Update service configuration by creating temp YAML, syncing, then deleting"""
+def update_service_config(service_name: str, config_data: dict, github_token: str):
+    """Update service configuration in repository"""
     try:
-        # Get service data from MongoDB
-        services = service_manager.get_services()
-        service = next((s for s in services if s.get('name') == service_name), None)
-        if not service:
-            return {'success': False, 'error': f'Service {service_name} not found in MongoDB'}
-        
         # Repository details
         owner, repo = 'ductri09072004', 'demo_fiss1_B'
-        repo_b_url = service.get('metadata', {}).get('repo_b_url', DEFAULT_REPO_B_URL)
+        service_path = f"services/{service_name}/k8s"
         
         # Prepare remote URL with token
         remote = f"https://{github_token}@github.com/{owner}/{repo}.git"
@@ -1279,47 +1255,51 @@ def update_service_config_with_temp_yaml(service_name: str, config_data: dict, g
         subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
         subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
         
-        # Create temporary YAML files with updated configuration
-        service_dir = os.path.join(clone_dir, 'services', service_name)
-        k8s_dir = os.path.join(service_dir, 'k8s')
-        os.makedirs(k8s_dir, exist_ok=True)
+        # Update deployment.yaml
+        deployment_path = os.path.join(clone_dir, service_path, 'deployment.yaml')
+        if os.path.exists(deployment_path):
+            with open(deployment_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Update replicas
+            content = re.sub(r'replicas:\s*\d+', f'replicas: {config_data["replicas"]}', content)
+            
+            # Update resources
+            resource_pattern = r'resources:\s*\n\s*requests:\s*\n\s*memory:\s*"[^"]*"\s*\n\s*cpu:\s*"[^"]*"\s*\n\s*limits:\s*\n\s*memory:\s*"[^"]*"\s*\n\s*cpu:\s*"[^"]*"'
+            new_resources = f'''resources:
+            requests:
+              memory: "{config_data["memory_request"]}"
+              cpu: "{config_data["cpu_request"]}"
+            limits:
+              memory: "{config_data["memory_limit"]}"
+              cpu: "{config_data["cpu_limit"]}"'''
+            
+            content = re.sub(resource_pattern, new_resources, content, flags=re.MULTILINE | re.DOTALL)
+            
+            # Update description in metadata
+            content = re.sub(r'description:\s*"[^"]*"', f'description: "{config_data["description"]}"', content)
+            
+            with open(deployment_path, 'w', encoding='utf-8') as f:
+                f.write(content)
         
-        # Get template files
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        template_b = os.path.join(base_dir, 'templates_src', 'repo_b_template', 'k8s')
-        if not os.path.isdir(template_b):
-            fallback = r"E:\\Study\\demo_fiss1_B\k8s"
-            if os.path.isdir(fallback):
-                template_b = fallback
-            else:
-                return {'success': False, 'error': f'Template B not found: {template_b}'}
+        # Update configmap.yaml (port excluded as it cannot be changed)
+        configmap_path = os.path.join(clone_dir, service_path, 'configmap.yaml')
+        if os.path.exists(configmap_path):
+            # Note: PORT is not updated to prevent service connectivity issues
+            pass
         
-        # Copy and update template files
-        for template_file in os.listdir(template_b):
-            if template_file.endswith(('.yaml', '.yml')):
-                src_path = os.path.join(template_b, template_file)
-                dst_path = os.path.join(k8s_dir, template_file)
-                
-                # Read template and replace placeholders
-                with open(src_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Replace placeholders with updated values
-                content = content.replace('{SERVICE_NAME}', service_name)
-                content = content.replace('{NAMESPACE}', service.get('namespace', service_name))
-                content = content.replace('{PORT}', str(service.get('port', 5001)))
-                content = content.replace('{REPLICAS}', str(config_data["replicas"]))
-                content = content.replace('{MIN_REPLICAS}', str(config_data["min_replicas"]))
-                content = content.replace('{MAX_REPLICAS}', str(config_data["max_replicas"]))
-                content = content.replace('{CPU_REQUEST}', config_data["cpu_request"])
-                content = content.replace('{CPU_LIMIT}', config_data["cpu_limit"])
-                content = content.replace('{MEMORY_REQUEST}', config_data["memory_request"])
-                content = content.replace('{MEMORY_LIMIT}', config_data["memory_limit"])
-                content = content.replace('{IMAGE_TAG}', 'latest')
-                
-                # Write to destination
-                with open(dst_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
+        # Update hpa.yaml
+        hpa_path = os.path.join(clone_dir, service_path, 'hpa.yaml')
+        if os.path.exists(hpa_path):
+            with open(hpa_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Update min/max replicas
+            content = re.sub(r'minReplicas:\s*\d+', f'minReplicas: {config_data["min_replicas"]}', content)
+            content = re.sub(r'maxReplicas:\s*\d+', f'maxReplicas: {config_data["max_replicas"]}', content)
+            
+            with open(hpa_path, 'w', encoding='utf-8') as f:
+                f.write(content)
         
         # Commit and push changes
         subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
@@ -1334,37 +1314,16 @@ def update_service_config_with_temp_yaml(service_name: str, config_data: dict, g
             if push_proc.returncode != 0:
                 return {'success': False, 'error': f'Failed to push changes: {push_proc.stderr}'}
         
-        # Wait for ArgoCD to sync
-        print(f"⏳ Waiting for ArgoCD to sync {service_name}...")
-        import time
-        time.sleep(10)
-        
-        # Delete the temporary YAML files
-        print(f"🗑️  Cleaning up temporary YAML files for {service_name}...")
-        try:
-            shutil.rmtree(service_dir)
-            print(f"✅ Deleted {service_dir}")
-            
-            # Commit the deletion
-            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-            if st.stdout.strip():
-                subprocess.run(['git', 'commit', '-m', f'Clean up temporary manifests for {service_name}'], cwd=clone_dir, check=True)
-                subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, check=True)
-                print(f"✅ Cleaned up temporary files for {service_name}")
-        except Exception as e:
-            print(f"⚠️  Cleanup failed: {e}")
-        
-        # Clean up temp directory
+        # Clean up
         shutil.rmtree(tmpdir, ignore_errors=True)
         
         return {
             'success': True,
             'details': {
                 'service_name': service_name,
-                'updated_files': ['deployment.yaml', 'hpa.yaml', 'configmap.yaml'],
+                'updated_files': ['deployment.yaml', 'hpa.yaml'],
                 'repository': f'https://github.com/{owner}/{repo}',
-                'note': 'Temporary YAML files created, synced, then cleaned up'
+                'note': 'Port configuration is protected and cannot be changed'
             }
         }
         
@@ -1434,45 +1393,12 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                 template_b = fallback
             else:
                 return {'success': False, 'error': f'Template B not found: {template_b}'}
-        # Create services/{SERVICE_NAME}/k8s structure for ArgoCD to sync
-        # Then delete after sync to keep repo clean
-        print(f"INFO: Creating temporary YAML files for {service_name} - ArgoCD will sync then delete")
+        # Skip creating services/{SERVICE_NAME}/k8s structure - plugin will render from MongoDB
+        # No need to create YAML files in Repo B anymore
+        print(f"INFO: Skipping YAML file creation for {service_name} - plugin will render from MongoDB")
         
-        # Create service directory structure
-        service_dir = os.path.join(clone_dir, 'services', service_name)
-        k8s_dir = os.path.join(service_dir, 'k8s')
-        os.makedirs(k8s_dir, exist_ok=True)
-        
-        # Copy template files and replace placeholders
-        for template_file in os.listdir(template_b):
-            if template_file.endswith(('.yaml', '.yml')):
-                src_path = os.path.join(template_b, template_file)
-                dst_path = os.path.join(k8s_dir, template_file)
-                
-                # Read template and replace placeholders
-                with open(src_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Replace placeholders with actual values
-                content = content.replace('{SERVICE_NAME}', service_name)
-                content = content.replace('{NAMESPACE}', namespace)
-                content = content.replace('{PORT}', str(container_port))
-                content = content.replace('{REPLICAS}', str(replicas))
-                content = content.replace('{MIN_REPLICAS}', str(min_replicas))
-                content = content.replace('{MAX_REPLICAS}', str(max_replicas))
-                content = content.replace('{CPU_REQUEST}', cpu_request)
-                content = content.replace('{CPU_LIMIT}', cpu_limit)
-                content = content.replace('{MEMORY_REQUEST}', memory_request)
-                content = content.replace('{MEMORY_LIMIT}', memory_limit)
-                content = content.replace('{IMAGE_TAG}', image_tag)
-                content = content.replace('{GH_OWNER}', gh_owner)
-                content = content.replace('{REPO_A_NAME}', repo_a_name)
-                
-                # Write to destination
-                with open(dst_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-        
-        print(f"✅ Created YAML files for {service_name} in {k8s_dir}")
+        # No need to replace placeholders since we're not creating YAML files
+        # Plugin will render YAML from MongoDB with correct values
 
         
         
@@ -1496,11 +1422,12 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Set default results since we're skipping monitoring setup
         prometheus_result = "⏭️ Skipped (no files created)"
 
-        # Create ArgoCD Application
+        # Create ArgoCD Application for plugin to work
         apps_dir = os.path.join(clone_dir, 'apps')
         os.makedirs(apps_dir, exist_ok=True)
         app_file = os.path.join(apps_dir, f'{service_name}-application.yaml')
         
+        # Create ArgoCD Application content for plugin-based workflow
         app_content = f"""apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -1513,7 +1440,9 @@ spec:
   source:
     repoURL: {repo_b_url.replace('.git', '')}
     targetRevision: HEAD
-    path: services/{service_name}/k8s
+    path: .
+    plugin:
+      name: mongo-plugin
   destination:
     server: https://kubernetes.default.svc
     namespace: {namespace}
@@ -1539,13 +1468,13 @@ spec:
         with open(app_file, 'w', encoding='utf-8') as f:
             f.write(app_content)
 
-        # Commit and push manifests to Repo B first
+        # Commit and push ArgoCD Application to Repo B
         subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
         subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
         subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
         st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
         if st.stdout.strip():
-            subprocess.run(['git', 'commit', '-m', f'Add/Update manifests for {service_name}'], cwd=clone_dir, check=True)
+            subprocess.run(['git', 'commit', '-m', f'Add ArgoCD Application for {service_name}'], cwd=clone_dir, check=True)
         push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
         if push_proc.returncode != 0:
             return {'success': False, 'error': push_proc.stderr}
@@ -1558,29 +1487,7 @@ spec:
             print(f"⚠️  ArgoCD Application deploy failed: {e.stderr.decode()}")
             # Continue anyway - user can apply manually
         
-        # Wait a moment for ArgoCD to sync
-        print(f"⏳ Waiting for ArgoCD to sync {service_name}...")
-        import time
-        time.sleep(10)  # Wait 10 seconds for initial sync
-        
-        # Now delete the YAML files to keep repo clean
-        print(f"🗑️  Cleaning up YAML files for {service_name}...")
-        try:
-            # Delete the service directory
-            shutil.rmtree(service_dir)
-            print(f"✅ Deleted {service_dir}")
-            
-            # Commit the deletion
-            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-            if st.stdout.strip():
-                subprocess.run(['git', 'commit', '-m', f'Clean up temporary manifests for {service_name}'], cwd=clone_dir, check=True)
-                subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, check=True)
-                print(f"✅ Cleaned up temporary files for {service_name}")
-        except Exception as e:
-            print(f"⚠️  Cleanup failed: {e}")
-        
-        print(f"✅ Service '{service_name}' deployed and cleaned up - ArgoCD will manage from here")
+        print(f"✅ Service '{service_name}' configuration saved to MongoDB - plugin will handle deployment")
 
         return {
             'success': True,
