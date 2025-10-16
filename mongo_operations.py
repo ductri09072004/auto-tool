@@ -497,26 +497,26 @@ class MongoOperations:
             # Insert/Update in services collection
             self.db.services.update_one({'name': service_name}, {'$set': service_doc}, upsert=True)
             
-                # Add to service_events collection for logging
-                self.db.service_events.insert_one({
-                    'service_name': service_name,
-                    'event_type': 'created',
-                    'event_data': service_doc,
-                    'timestamp': timestamp
-                })
-                
-                # Add to manifest_versions collection
-                self.db.manifest_versions.insert_one({
-                    'service_name': service_name,
-                    'version': 1,
-                    'manifest_type': 'deployment',
-                    'content': json.dumps(service_doc['deployment']),
-                    'created_at': timestamp,
-                    'updated_at': timestamp
-                })
-                
-                print(f"DEBUG: Successfully added {service_name} to services collection")
-                return True
+            # Add to service_events collection for logging
+            self.db.service_events.insert_one({
+                'service_name': service_name,
+                'event_type': 'created',
+                'event_data': service_doc,
+                'timestamp': timestamp
+            })
+            
+            # Add to manifest_versions collection
+            self.db.manifest_versions.insert_one({
+                'service_name': service_name,
+                'version': 1,
+                'manifest_type': 'deployment',
+                'content': json.dumps(service_doc['deployment']),
+                'created_at': timestamp,
+                'updated_at': timestamp
+            })
+            
+            print(f"DEBUG: Successfully added {service_name} to services collection")
+            return True
         except Exception as e:
             print(f"ERROR: Failed to add service to services collection: {e}")
             import traceback
