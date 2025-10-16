@@ -364,7 +364,7 @@ class MongoOperations:
                 'project': 'default',
                 'repo_url': parsed_data['repo_url'],
                 'target_revision': parsed_data['target_revision'],
-                'path': f"services/{service_name}/k8s",
+                'path': '.',  # Root path vì plugin sẽ render YAML tạm thời
                 'destination_server': parsed_data['destination_server'],
                 'destination_namespace': parsed_data['destination_namespace'],
                 'sync_policy': parsed_data['sync_policy'],
@@ -474,7 +474,7 @@ class MongoOperations:
                     'namespace': 'argocd',
                     'project': 'default',
                     'target_revision': 'HEAD',
-                    'path': f"services/{service_name}/k8s",
+                    'path': '.',  # Root path vì plugin sẽ render YAML tạm thời
                     'destination_server': 'https://kubernetes.default.svc',
                     'destination_namespace': service_data.get('namespace', service_name),
                     'sync_policy': {
