@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime
 from pymongo import MongoClient, ASCENDING, DESCENDING
+from mongo_operations import MongoOperations
 
 
 class ServiceManager:
@@ -14,6 +15,7 @@ class ServiceManager:
         self.mongo_db_name = mongo_db or os.environ.get('MONGO_DB', 'AutoToolDevOPS')
         self.client = MongoClient(self.mongo_uri)
         self.db = self.client[self.mongo_db_name]
+        self.mongo_ops = MongoOperations(mongo_uri, mongo_db)
         self._ensure_indexes()
 
     def _ensure_indexes(self):
@@ -47,6 +49,26 @@ class ServiceManager:
             return True
         except Exception:
             return False
+
+    def parse_yaml_files(self, service_name, k8s_path):
+        """Parse YAML files from k8s folder and extract data for MongoDB collections."""
+        return self.mongo_ops.parse_yaml_files(service_name, k8s_path)
+
+    def add_service_from_yaml(self, service_name, k8s_path, repo_url=''):
+        """Add service to all collections by parsing YAML files from k8s folder."""
+        return self.mongo_ops.add_service_from_yaml(service_name, k8s_path, repo_url)
+
+    def add_service_complete(self, service_data):
+        """Add service to all collections (services, deployments, k8s_services, configmaps, hpas, ingresses, namespaces, secrets, argocd_applications, manifest_versions)."""
+        return self.mongo_ops.add_service_complete(service_data)
+
+    def delete_service_from_all_collections(self, service_name):
+        """Delete service from all collections."""
+        return self.mongo_ops.delete_service_from_all_collections(service_name)
+
+    def get_collection_stats(self):
+        """Get statistics for all collections."""
+        return self.mongo_ops.get_collection_stats()
 
     def get_services(self, status=None):
         """Get all services or filter by status."""

@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {SERVICE_NAME}-ingress
+  namespace: {NAMESPACE}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    external-dns.alpha.kubernetes.io/hostname: jollicow.store
+spec:
+  tls:
+  - hosts:
+    - jollicow.store
+    secretName: {SERVICE_NAME}-tls
+  rules:
+  - host: jollicow.store
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: {SERVICE_NAME}-service
+            port:
+              number: 80

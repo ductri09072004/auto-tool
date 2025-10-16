@@ -681,20 +681,8 @@ def sync_services():
             # Check if service already exists in database
             existing_services = service_manager.get_services()
             if not any(s['name'] == service_name for s in existing_services):
-                # Add to database
-                db_service_data = {
-                    'name': service_name,
-                    'namespace': service_name,
-                    'port': service_info.get('port', 5001),
-                    'description': service_info.get('description', f'Demo service {service_name}'),
-                    'repo_url': '',  # Not available from folder structure
-                    'metadata': {
-                        'synced_from': 'repo_b',
-                        'folder_path': service_path
-                    }
-                }
-                
-                if service_manager.add_service(db_service_data):
+                # Add to database - parse from YAML files
+                if service_manager.add_service_from_yaml(service_name, k8s_path, ''):
                     synced_count += 1
         
         return jsonify({
@@ -853,13 +841,23 @@ def create_service():
             if not repo_b_res['success']:
                 return jsonify({'success': False, 'error': f"Repo B update failed: {repo_b_res['error']}"}), 500
             
-            # Save to database
+            # Save to database - use form data to populate all collections
+            # ArgoCD plugin will later read from MongoDB and create YAML files
+            print(f"DEBUG: Creating service {service_name} with form data")
+            
             db_service_data = {
                 'name': service_name,
                 'namespace': namespace,
                 'port': int(port),
                 'description': description,
                 'repo_url': repo_url,
+                'replicas': int(replicas),
+                'min_replicas': int(min_replicas),
+                'max_replicas': int(max_replicas),
+                'cpu_request': cpu_request,
+                'cpu_limit': cpu_limit,
+                'memory_request': memory_request,
+                'memory_limit': memory_limit,
                 'metadata': {
                     'created_by': 'portal',
                     'template': 'repo_a_template',
@@ -867,20 +865,21 @@ def create_service():
                     'repo_b_path': repo_b_path
                 }
             }
-            service_manager.add_service(db_service_data)
+            result = service_manager.add_service_complete(db_service_data)
+            print(f"DEBUG: add_service_complete result: {result}")
             
             return jsonify({
                 'success': True,
                 'message': f'Service "{service_name}" created successfully!',
-                'repo_url': result['repo_url'],
-                'clone_url': result['clone_url'],
+                'repo_url': repo_url,
+                'clone_url': repo_url,
                 'repo_b_url': repo_b_url,
                 'repo_b_path': repo_b_path
             })
         else:
             return jsonify({
                 'success': False,
-                'error': result['error']
+                'error': 'Failed to create service'
             }), 500
             
     except Exception as e:

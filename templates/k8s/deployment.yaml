@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {SERVICE_NAME}
+  namespace: {NAMESPACE}
+  labels:
+    app: {SERVICE_NAME}
+    version: v1.0.0
+spec:
+  replicas: {REPLICAS}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: {SERVICE_NAME}
+  template:
+    metadata:
+      labels:
+        app: {SERVICE_NAME}
+        version: v1.0.0
+      annotations:
+        argocd.argoproj.io/sync-wave: "0"
+        timestamp: "1760331233"
+        deployment.kubernetes.io/revision: "1"
+    spec:
+      containers:
+      - name: {SERVICE_NAME}
+        image: ghcr.io/ductri09072004/{SERVICE_NAME}:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: {PORT}
+          name: http
+        env:
+        - name: FLASK_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: {NAMESPACE}-config
+              key: FLASK_ENV
+        - name: PYTHONUNBUFFERED
+          valueFrom:
+            configMapKeyRef:
+              name: {NAMESPACE}-config
+              key: PYTHONUNBUFFERED
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {NAMESPACE}-config
+              key: PORT
+        resources:
+          requests:
+            memory: "{MEMORY_REQUEST}"
+            cpu: "{CPU_REQUEST}"
+          limits:
+            memory: "{MEMORY_LIMIT}"
+            cpu: "{CPU_LIMIT}"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: {PORT}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: {PORT}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
