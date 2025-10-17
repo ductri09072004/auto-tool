@@ -1449,7 +1449,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                     with open(dst_file, 'w', encoding='utf-8') as f:
                         f.write(content)
                     
-                    print(f"✅ Created {yaml_file} for {service_name}")
+                    print(f"Created {yaml_file} for {service_name}")
         
         # Auto-configure Prometheus
         try:
@@ -1462,10 +1462,10 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
             
             # Store results for return
-            prometheus_result = "✅ Prometheus configured" if prometheus_config_added else "❌ Prometheus config failed"
+            prometheus_result = "Prometheus configured" if prometheus_config_added else "Prometheus config failed"
             
         except Exception as e:
-            prometheus_result = f"❌ Prometheus error: {str(e)}"
+            prometheus_result = f"Prometheus error: {str(e)}"
 
         # Create ArgoCD Application pointing to services/{SERVICE_NAME}/k8s
         apps_dir = os.path.join(clone_dir, 'apps')
@@ -1525,12 +1525,12 @@ spec:
         # Auto-deploy ArgoCD Application after successful push
         try:
             subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
-            print(f"✅ ArgoCD Application '{service_name}' deployed successfully")
+            print(f"ArgoCD Application '{service_name}' deployed successfully")
         except subprocess.CalledProcessError as e:
-            print(f"⚠️  ArgoCD Application deploy failed: {e.stderr.decode()}")
+            print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
             # Continue anyway - user can apply manually
         
-        print(f"✅ Service '{service_name}' created with YAML manifests in Repo B")
+        print(f"Service '{service_name}' created with YAML manifests in Repo B")
         
         # Schedule deletion of YAML files after ArgoCD sync (in background)
         import threading
@@ -1569,21 +1569,21 @@ spec:
                                                      capture_output=True, text=True)
                     deployment_ready = deployment_result.returncode == 0 and deployment_result.stdout.strip().isdigit() and int(deployment_result.stdout.strip()) > 0
                     
-                    print(f"⏳ Status check for {service_name} (waited {waited_time}s):")
-                    print(f"   - ArgoCD Synced: {'✅' if argocd_synced else '❌'}")
-                    print(f"   - Pods Running: {'✅' if pods_running else '❌'}")
-                    print(f"   - Deployment Ready: {'✅' if deployment_ready else '❌'}")
+                    print(f"Status check for {service_name} (waited {waited_time}s):")
+                    print(f"   - ArgoCD Synced: {'YES' if argocd_synced else 'NO'}")
+                    print(f"   - Pods Running: {'YES' if pods_running else 'NO'}")
+                    print(f"   - Deployment Ready: {'YES' if deployment_ready else 'NO'}")
                     
                     # All checks must pass
                     if argocd_synced and pods_running and deployment_ready:
-                        print(f"✅ All checks passed for {service_name} after {waited_time} seconds")
+                        print(f"All checks passed for {service_name} after {waited_time} seconds")
                         break
                     else:
-                        print(f"⏳ Still waiting for {service_name} to be fully ready...")
+                        print(f"Still waiting for {service_name} to be fully ready...")
                 
                 # Final check after max wait time
                 if waited_time >= max_wait_time:
-                    print(f"⚠️ ArgoCD sync timeout for {service_name} after {max_wait_time} seconds, proceeding anyway...")
+                    print(f"ArgoCD sync timeout for {service_name} after {max_wait_time} seconds, proceeding anyway...")
                 
                 # Final comprehensive check before proceeding
                 final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
@@ -1596,7 +1596,7 @@ spec:
                 
                 if argocd_final and pods_final:
                     # ArgoCD has synced, safe to delete YAML files
-                    print(f"🔄 ArgoCD synced successfully for {service_name}, deleting YAML files...")
+                    print(f"ArgoCD synced successfully for {service_name}, deleting YAML files...")
                     
                     # Delete YAML files from Repo B
                     yaml_files_to_delete = [
@@ -1621,19 +1621,19 @@ spec:
                         file_path = os.path.join(clone_dir, 'services', service_name, 'k8s', yaml_file)
                         if os.path.exists(file_path):
                             os.remove(file_path)
-                            print(f"🗑️ Deleted {yaml_file}")
+                            print(f"Deleted {yaml_file}")
                     
                     # Remove the entire k8s directory if empty
                     k8s_dir = os.path.join(clone_dir, 'services', service_name, 'k8s')
                     if os.path.exists(k8s_dir) and not os.listdir(k8s_dir):
                         os.rmdir(k8s_dir)
-                        print(f"🗑️ Deleted empty k8s directory")
+                        print(f"Deleted empty k8s directory")
                     
                     # Remove services directory if empty
                     service_dir = os.path.join(clone_dir, 'services', service_name)
                     if os.path.exists(service_dir) and not os.listdir(service_dir):
                         os.rmdir(service_dir)
-                        print(f"🗑️ Deleted empty service directory")
+                        print(f"Deleted empty service directory")
                     
                     # Commit and push deletion
                     subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
@@ -1644,15 +1644,15 @@ spec:
                     if st.stdout.strip():
                         subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], cwd=clone_dir, check=True)
                         subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, check=True)
-                        print(f"✅ Cleaned up YAML files for {service_name}")
+                        print(f"Cleaned up YAML files for {service_name}")
                     
                     # Cleanup temp directory
                     shutil.rmtree(clone_dir)
                 else:
-                    print(f"⚠️ ArgoCD sync not completed for {service_name}, keeping YAML files")
+                    print(f"ArgoCD sync not completed for {service_name}, keeping YAML files")
                     
             except Exception as e:
-                print(f"❌ Error in delete_yaml_files_after_sync: {e}")
+                print(f"Error in delete_yaml_files_after_sync: {e}")
         
         # Start background thread to delete YAML files
         delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
@@ -1856,11 +1856,32 @@ def get_service_image_tag(service_name):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/test-simple', methods=['POST'])
+def test_simple():
+    """Simple test endpoint without MongoDB"""
+    try:
+        print("Simple test called")
+        
+        payload = request.get_json()
+        print(f"Payload received: {payload}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Simple test successful',
+            'received_data': payload
+        })
+        
+    except Exception as e:
+        print(f"Simple test error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/github/webhook-debug', methods=['POST'])
 def github_webhook_debug():
     """Debug version of GitHub webhook - simplified"""
     try:
-        print("🔍 Debug webhook called")
+        print("Debug webhook called")
         
         # Parse webhook payload
         payload = request.get_json()
@@ -1876,122 +1897,162 @@ def github_webhook_debug():
         
         print(f"Processing webhook for repo: {repo_name}")
         
-        # Check if service exists in MongoDB
-        service_data = service_manager.get_service_data(repo_name)
-        if not service_data:
-            print(f"Service {repo_name} not found in MongoDB")
+        # Test MongoDB connection first
+        try:
+            service_data = service_manager.get_service_data(repo_name)
+            if not service_data:
+                print(f"Service {repo_name} not found in MongoDB")
+                return jsonify({
+                    'success': False,
+                    'message': f'Service {repo_name} not found in database',
+                    'service_name': repo_name
+                }), 404
+            
+            print(f"Service {repo_name} found in MongoDB")
+            
+            # Simple success response
+            return jsonify({
+                'success': True,
+                'message': f'Debug webhook processed for {repo_name}',
+                'service_name': repo_name,
+                'service_found': True
+            })
+            
+        except Exception as mongo_error:
+            print(f"MongoDB error: {mongo_error}")
             return jsonify({
                 'success': False,
-                'message': f'Service {repo_name} not found in database',
+                'message': f'MongoDB error: {str(mongo_error)}',
                 'service_name': repo_name
-            }), 404
-        
-        print(f"Service {repo_name} found in MongoDB")
-        
-        # Simple success response
-        return jsonify({
-            'success': True,
-            'message': f'Debug webhook processed for {repo_name}',
-            'service_name': repo_name,
-            'service_found': True
-        })
+            }), 500
         
     except Exception as e:
-        print(f"❌ Debug webhook error: {e}")
+        print(f"Debug webhook error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/github/webhook', methods=['POST'])
 def github_webhook():
-    """Handle GitHub webhook for Repo A changes"""
+    """Handle GitHub webhook for Repo A changes - Simplified version"""
     try:
-        # Get GitHub signature for verification
-        signature = request.headers.get('X-Hub-Signature-256', '')
-        if not verify_github_signature(request.data, signature):
-            return jsonify({'error': 'Invalid signature'}), 401
+        print("GitHub webhook called")
         
         # Parse webhook payload
         payload = request.get_json()
+        print(f"Payload: {payload}")
+        
+        if not payload:
+            return jsonify({'error': 'No payload received'}), 400
+        
         event_type = request.headers.get('X-GitHub-Event')
+        print(f"Event type: {event_type}")
         
         if event_type == 'push':
             # Extract repository information
-            repo_name = payload['repository']['name']
-            branch = payload['ref'].split('/')[-1]  # Extract branch from refs/heads/main
+            repo_name = payload.get('repository', {}).get('name')
+            if not repo_name:
+                return jsonify({'error': 'Repository name not found'}), 400
+                
+            branch = payload.get('ref', '').split('/')[-1]  # Extract branch from refs/heads/main
+            print(f"Processing push to {repo_name} on branch {branch}")
             
             # Only process main/master branch pushes
             if branch in ['main', 'master']:
                 # Extract commit info
-                commit_sha = payload['head_commit']['id']
+                commit_sha = payload.get('head_commit', {}).get('id')
+                if not commit_sha:
+                    return jsonify({'error': 'Commit SHA not found'}), 400
+                    
                 commit_short = commit_sha[:7]
                 image_tag = f"main-{commit_short}"
                 
-                print(f"🔄 GitHub webhook: {repo_name} pushed to {branch} (commit: {commit_short})")
+                print(f"Processing webhook: {repo_name} pushed to {branch} (commit: {commit_short})")
                 
                 # Check if service exists in MongoDB
-                service_data = service_manager.get_service_data(repo_name)
-                if not service_data:
-                    print(f"⚠️ Service {repo_name} not found in MongoDB, skipping webhook")
+                try:
+                    service_data = service_manager.get_service_data(repo_name)
+                    if not service_data:
+                        print(f"Service {repo_name} not found in MongoDB")
+                        return jsonify({
+                            'success': False,
+                            'message': f'Service {repo_name} not found in database',
+                            'service_name': repo_name
+                        }), 404
+                    
+                    print(f"Service {repo_name} found in MongoDB")
+                    
+                    # Update image tag in MongoDB
+                    service_manager.mongo_ops.db.services.update_one(
+                        {'name': repo_name},
+                        {'$set': {
+                            'metadata.image_tag': image_tag,
+                            'metadata.last_commit': commit_sha,
+                            'updated_at': datetime.utcnow().isoformat()
+                        }}
+                    )
+                    print(f"Updated image tag to {image_tag} for {repo_name}")
+                    
+                    # Log the event
+                    service_manager.mongo_ops.db.service_events.insert_one({
+                        'service_name': repo_name,
+                        'event_type': 'github_push',
+                        'event_data': {
+                            'commit_sha': commit_sha,
+                            'image_tag': image_tag,
+                            'branch': branch,
+                            'repository': payload.get('repository', {}).get('full_name', '')
+                        },
+                        'timestamp': datetime.utcnow().isoformat()
+                    })
+                    print(f"Logged event for {repo_name}")
+                    
+                    # Trigger YAML recreation
+                    try:
+                        print(f"Starting YAML recreation for {repo_name}...")
+                        recreate_response = recreate_yaml_from_mongo(repo_name)
+                        
+                        # Check if it's a successful response
+                        if hasattr(recreate_response, 'get_json'):
+                            response_data = recreate_response.get_json()
+                            yaml_recreation_success = response_data.get('success', False)
+                            print(f"YAML recreation result: {yaml_recreation_success}")
+                        else:
+                            yaml_recreation_success = False
+                            print("YAML recreation returned invalid response format")
+                            
+                    except Exception as e:
+                        print(f"YAML recreation failed for {repo_name}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        yaml_recreation_success = False
+                    
+                    print(f"Webhook processing completed for {repo_name}")
+                    
+                    return jsonify({
+                        'success': True,
+                        'message': f'Webhook processed for {repo_name}',
+                        'service_name': repo_name,
+                        'image_tag': image_tag,
+                        'yaml_recreation_success': yaml_recreation_success
+                    })
+                    
+                except Exception as mongo_error:
+                    print(f"MongoDB error: {mongo_error}")
                     return jsonify({
                         'success': False,
-                        'message': f'Service {repo_name} not found in database',
+                        'message': f'MongoDB error: {str(mongo_error)}',
                         'service_name': repo_name
-                    }), 404
-                
-                # Update image tag in MongoDB
-                service_manager.mongo_ops.db.services.update_one(
-                    {'name': repo_name},
-                    {'$set': {
-                        'metadata.image_tag': image_tag,
-                        'metadata.last_commit': commit_sha,
-                        'updated_at': datetime.utcnow().isoformat()
-                    }}
-                )
-                
-                # Log the event
-                service_manager.mongo_ops.db.service_events.insert_one({
-                    'service_name': repo_name,
-                    'event_type': 'github_push',
-                    'event_data': {
-                        'commit_sha': commit_sha,
-                        'image_tag': image_tag,
-                        'branch': branch,
-                        'repository': payload['repository']['full_name']
-                    },
-                    'timestamp': datetime.utcnow().isoformat()
-                })
-                
-                # Trigger YAML recreation
-                try:
-                    # Call recreate_yaml_from_mongo and handle response properly
-                    recreate_response = recreate_yaml_from_mongo(repo_name)
-                    
-                    # Check if it's a successful response
-                    if hasattr(recreate_response, 'get_json'):
-                        response_data = recreate_response.get_json()
-                        yaml_recreation_success = response_data.get('success', False)
-                    else:
-                        yaml_recreation_success = False
-                        
-                    print(f"✅ YAML recreation completed for {repo_name}: {yaml_recreation_success}")
-                    
-                except Exception as e:
-                    print(f"❌ YAML recreation failed for {repo_name}: {e}")
-                    yaml_recreation_success = False
-                
-                return jsonify({
-                    'success': True,
-                    'message': f'Webhook processed for {repo_name}',
-                    'service_name': repo_name,
-                    'image_tag': image_tag,
-                    'yaml_recreation_success': yaml_recreation_success
-                })
-        
-        return jsonify({'message': 'Webhook received but no action taken'}), 200
+                    }), 500
+            else:
+                return jsonify({'message': f'Branch {branch} not processed (only main/master)'}), 200
+        else:
+            return jsonify({'message': f'Event type {event_type} not processed'}), 200
         
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
+        print(f"Webhook error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 def verify_github_signature(payload, signature):
