@@ -1747,6 +1747,100 @@ def recreate_yaml_from_mongo(service_name):
         )
         
         if result['success']:
+            # Schedule deletion of YAML files after ArgoCD sync (in background)
+            import threading
+            
+            def delete_yaml_files_after_sync(service_name, repo_b_url):
+                """Delete YAML files after ArgoCD has synced"""
+                try:
+                    import time
+                    start_time = time.time()
+                    print(f"Starting background thread to monitor ArgoCD sync for {service_name}")
+                    
+                    while time.time() - start_time < 300:  # Wait up to 5 minutes
+                        try:
+                            # Check ArgoCD sync status
+                            import requests
+                            argocd_response = requests.get(
+                                f"https://argocd-server/api/v1/applications/{service_name}",
+                                timeout=10
+                            )
+                            
+                            if argocd_response.status_code == 200:
+                                argocd_data = argocd_response.json()
+                                sync_status = argocd_data.get('status', {}).get('sync', {}).get('status')
+                                
+                                if sync_status == 'Synced':
+                                    # Check if pods are running
+                                    import subprocess
+                                    kubectl_cmd = ['kubectl', 'get', 'pods', '-n', service_name, '-o', 'json']
+                                    kubectl_result = subprocess.run(kubectl_cmd, capture_output=True, text=True)
+                                    
+                                    if kubectl_result.returncode == 0:
+                                        import json
+                                        pods_data = json.loads(kubectl_result.stdout)
+                                        pods = pods_data.get('items', [])
+                                        
+                                        if pods:
+                                            running_pods = [pod for pod in pods if pod.get('status', {}).get('phase') == 'Running']
+                                            if len(running_pods) >= 1:  # At least 1 pod running
+                                                print(f"ArgoCD synced and pods running for {service_name}, deleting YAML files...")
+                                                
+                                                # Delete YAML files from Repo B
+                                                yaml_files_to_delete = [
+                                                    'deployment.yaml',
+                                                    'service.yaml', 
+                                                    'configmap.yaml',
+                                                    'hpa.yaml',
+                                                    'ingress.yaml',
+                                                    'ingress-gateway.yaml',
+                                                    'secret.yaml',
+                                                    'namespace.yaml',
+                                                    'argocd-application.yaml'
+                                                ]
+                                                
+                                                # Clone repo and delete files
+                                                import tempfile
+                                                import shutil
+                                                tmpdir = tempfile.mkdtemp(prefix='delete_yaml_')
+                                                clone_dir = os.path.join(tmpdir, 'repo')
+                                                
+                                                clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                                          capture_output=True, text=True)
+                                                if clone_proc.returncode == 0:
+                                                    service_path = f"services/{service_name}/k8s"
+                                                    for yaml_file in yaml_files_to_delete:
+                                                        file_path = os.path.join(clone_dir, service_path, yaml_file)
+                                                        if os.path.exists(file_path):
+                                                            os.remove(file_path)
+                                                            print(f"Deleted {yaml_file}")
+                                                    
+                                                    # Commit and push changes
+                                                    subprocess.run(['git', 'add', '.'], cwd=clone_dir)
+                                                    subprocess.run(['git', 'commit', '-m', f'Delete YAML files after ArgoCD sync for {service_name}'], 
+                                                                 cwd=clone_dir)
+                                                    subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir)
+                                                    
+                                                    print(f"YAML files deleted successfully for {service_name}")
+                                                
+                                                # Cleanup
+                                                shutil.rmtree(tmpdir)
+                                                return
+                            
+                        except Exception as check_error:
+                            print(f"Error checking ArgoCD status: {check_error}")
+                        
+                        time.sleep(30)  # Wait 30 seconds before next check
+                    
+                    print(f"ArgoCD sync timeout for {service_name}, keeping YAML files")
+                    
+                except Exception as e:
+                    print(f"Error in delete_yaml_files_after_sync: {e}")
+            
+            # Start background thread to delete YAML files
+            delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
+            delete_thread.start()
+            
             return jsonify({
                 'success': True,
                 'message': f'YAML files recreated for {service_name} from MongoDB data',
@@ -1755,7 +1849,7 @@ def recreate_yaml_from_mongo(service_name):
                     'repo_a_url': repo_a_url,
                     'repo_b_url': repo_b_url,
                     'namespace': namespace,
-                    'note': 'ArgoCD will automatically sync the new YAML files'
+                    'note': 'ArgoCD will automatically sync the new YAML files and they will be deleted after sync'
                 }
             })
         else:
