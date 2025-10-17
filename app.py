@@ -24,9 +24,9 @@ except Exception:
 
 app = Flask(__name__)
 
-# Initialize Service Manager with correct MongoDB URL
-mongo_uri = 'mongodb+srv://BlueDuck2:Fcsunny0907@tpexpress.zjf26.mongodb.net/?retryWrites=true&w=majority&appName=TPExpress'
-mongo_db = 'AutoToolDevOPS'
+# Initialize Service Manager with environment variables
+mongo_uri = os.environ.get('MONGO_URI', 'mongodb+srv://BlueDuck2:Fcsunny0907@tpexpress.zjf26.mongodb.net/?retryWrites=true&w=majority&appName=TPExpress')
+mongo_db = os.environ.get('MONGO_DB', 'AutoToolDevOPS')
 service_manager = ServiceManager(mongo_uri, mongo_db)
 register_db_api(app, service_manager)
 
