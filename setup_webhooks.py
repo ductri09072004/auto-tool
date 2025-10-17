@@ -40,10 +40,10 @@ def setup_webhooks():
                         
                         print(f"GitHub Repo: {github_repo}")
                         print(f"Webhook URL: {webhook_url}")
-                        print("✅ Ready for webhook setup")
+                        print("READY: Ready for webhook setup")
                         
                         # Instructions for manual setup
-                        print(f"\n📋 Manual Setup Instructions:")
+                        print(f"\nMANUAL SETUP INSTRUCTIONS:")
                         print(f"1. Go to: https://github.com/{github_repo}/settings/hooks")
                         print(f"2. Click 'Add webhook'")
                         print(f"3. Payload URL: {webhook_url}")
@@ -52,23 +52,23 @@ def setup_webhooks():
                         print(f"6. Secret: (optional for development)")
                         print(f"7. Click 'Add webhook'")
                     else:
-                        print("❌ Invalid GitHub URL format")
+                        print("ERROR: Invalid GitHub URL format")
                 else:
-                    print("⚠️ Not a GitHub repository")
+                    print("WARNING: Not a GitHub repository")
             else:
-                print("❌ No repo URL configured")
+                print("ERROR: No repo URL configured")
             
             print("-" * 40)
         
-        print(f"\n🎉 Webhook setup instructions generated for all services!")
-        print(f"\n💡 Test webhook with:")
+        print(f"\nSUCCESS: Webhook setup instructions generated for all services!")
+        print(f"\nTEST: Test webhook with:")
         print(f"curl -X POST {webhook_url} \\")
         print(f"  -H 'Content-Type: application/json' \\")
         print(f"  -H 'X-GitHub-Event: push' \\")
         print(f"  -d '{{\"repository\":{{\"name\":\"demo-v107\"}},\"ref\":\"refs/heads/main\",\"head_commit\":{{\"id\":\"abc123\"}}}}'")
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"ERROR: {e}")
 
 if __name__ == "__main__":
     setup_webhooks()

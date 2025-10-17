@@ -24,8 +24,10 @@ except Exception:
 
 app = Flask(__name__)
 
-# Initialize Service Manager
-service_manager = ServiceManager()
+# Initialize Service Manager with correct MongoDB URL
+mongo_uri = 'mongodb+srv://BlueDuck2:Fcsunny0907@tpexpress.zjf26.mongodb.net/?retryWrites=true&w=majority&appName=TPExpress'
+mongo_db = 'AutoToolDevOPS'
+service_manager = ServiceManager(mongo_uri, mongo_db)
 register_db_api(app, service_manager)
 
 def start_port_forward():
@@ -1767,26 +1769,36 @@ def update_service_from_repo_a(service_name):
     """Update service when Repo A code changes - triggers YAML recreation"""
     try:
         # First recreate YAML files from MongoDB
-        recreate_result = recreate_yaml_from_mongo(service_name)
+        recreate_response = recreate_yaml_from_mongo(service_name)
         
-        if recreate_result[1] != 200:  # Check if recreate failed
-            return recreate_result
+        # Handle the response properly
+        if hasattr(recreate_response, 'get_json'):
+            recreate_data = recreate_response.get_json()
+            success = recreate_data.get('success', False)
+        else:
+            recreate_data = {'error': 'Invalid response format'}
+            success = False
         
-        # Get the response data
-        recreate_data = recreate_result[0].get_json()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Service {service_name} updated from Repo A changes',
-            'service_name': service_name,
-            'yaml_recreation': recreate_data,
-            'next_steps': [
-                'YAML files have been recreated in Repo B',
-                'ArgoCD will automatically detect changes',
-                'New image will be deployed to Kubernetes',
-                'YAML files will be cleaned up after deployment'
-            ]
-        })
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Service {service_name} updated from Repo A changes',
+                'service_name': service_name,
+                'yaml_recreation': recreate_data,
+                'next_steps': [
+                    'YAML files have been recreated in Repo B',
+                    'ArgoCD will automatically detect changes',
+                    'New image will be deployed to Kubernetes',
+                    'YAML files will be cleaned up after deployment'
+                ]
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Failed to update service {service_name}',
+                'service_name': service_name,
+                'error': recreate_data.get('error', 'Unknown error')
+            }), 500
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1842,6 +1854,52 @@ def get_service_image_tag(service_name):
         })
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/github/webhook-debug', methods=['POST'])
+def github_webhook_debug():
+    """Debug version of GitHub webhook - simplified"""
+    try:
+        print("🔍 Debug webhook called")
+        
+        # Parse webhook payload
+        payload = request.get_json()
+        print(f"Payload: {payload}")
+        
+        if not payload:
+            return jsonify({'error': 'No payload received'}), 400
+        
+        # Extract repository information
+        repo_name = payload.get('repository', {}).get('name')
+        if not repo_name:
+            return jsonify({'error': 'Repository name not found'}), 400
+        
+        print(f"Processing webhook for repo: {repo_name}")
+        
+        # Check if service exists in MongoDB
+        service_data = service_manager.get_service_data(repo_name)
+        if not service_data:
+            print(f"Service {repo_name} not found in MongoDB")
+            return jsonify({
+                'success': False,
+                'message': f'Service {repo_name} not found in database',
+                'service_name': repo_name
+            }), 404
+        
+        print(f"Service {repo_name} found in MongoDB")
+        
+        # Simple success response
+        return jsonify({
+            'success': True,
+            'message': f'Debug webhook processed for {repo_name}',
+            'service_name': repo_name,
+            'service_found': True
+        })
+        
+    except Exception as e:
+        print(f"❌ Debug webhook error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/github/webhook', methods=['POST'])
@@ -1905,14 +1963,29 @@ def github_webhook():
                 })
                 
                 # Trigger YAML recreation
-                recreate_response, recreate_status = recreate_yaml_from_mongo(repo_name)
+                try:
+                    # Call recreate_yaml_from_mongo and handle response properly
+                    recreate_response = recreate_yaml_from_mongo(repo_name)
+                    
+                    # Check if it's a successful response
+                    if hasattr(recreate_response, 'get_json'):
+                        response_data = recreate_response.get_json()
+                        yaml_recreation_success = response_data.get('success', False)
+                    else:
+                        yaml_recreation_success = False
+                        
+                    print(f"✅ YAML recreation completed for {repo_name}: {yaml_recreation_success}")
+                    
+                except Exception as e:
+                    print(f"❌ YAML recreation failed for {repo_name}: {e}")
+                    yaml_recreation_success = False
                 
                 return jsonify({
                     'success': True,
                     'message': f'Webhook processed for {repo_name}',
                     'service_name': repo_name,
                     'image_tag': image_tag,
-                    'yaml_recreation': recreate_response.get_json() if recreate_status == 200 else None
+                    'yaml_recreation_success': yaml_recreation_success
                 })
         
         return jsonify({'message': 'Webhook received but no action taken'}), 200
