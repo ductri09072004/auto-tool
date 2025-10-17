@@ -1871,6 +1871,16 @@ def github_webhook():
                 
                 print(f"🔄 GitHub webhook: {repo_name} pushed to {branch} (commit: {commit_short})")
                 
+                # Check if service exists in MongoDB
+                service_data = service_manager.get_service_data(repo_name)
+                if not service_data:
+                    print(f"⚠️ Service {repo_name} not found in MongoDB, skipping webhook")
+                    return jsonify({
+                        'success': False,
+                        'message': f'Service {repo_name} not found in database',
+                        'service_name': repo_name
+                    }), 404
+                
                 # Update image tag in MongoDB
                 service_manager.mongo_ops.db.services.update_one(
                     {'name': repo_name},
@@ -1888,20 +1898,21 @@ def github_webhook():
                     'event_data': {
                         'commit_sha': commit_sha,
                         'image_tag': image_tag,
-                        'branch': branch
+                        'branch': branch,
+                        'repository': payload['repository']['full_name']
                     },
                     'timestamp': datetime.utcnow().isoformat()
                 })
                 
                 # Trigger YAML recreation
-                recreate_result = recreate_yaml_from_mongo(repo_name)
+                recreate_response, recreate_status = recreate_yaml_from_mongo(repo_name)
                 
                 return jsonify({
                     'success': True,
                     'message': f'Webhook processed for {repo_name}',
                     'service_name': repo_name,
                     'image_tag': image_tag,
-                    'yaml_recreation': recreate_result[0].get_json() if recreate_result[1] == 200 else None
+                    'yaml_recreation': recreate_response.get_json() if recreate_status == 200 else None
                 })
         
         return jsonify({'message': 'Webhook received but no action taken'}), 200
@@ -1932,6 +1943,38 @@ def verify_github_signature(payload, signature):
     except Exception as e:
         print(f"❌ Signature verification error: {e}")
         return False
+
+@app.route('/api/services/webhook-ready', methods=['GET'])
+def get_webhook_ready_services():
+    """Get list of services that can receive webhooks"""
+    try:
+        services = service_manager.mongo_ops.db.services.find({}, {
+            'name': 1,
+            'repo_url': 1,
+            'metadata.image_tag': 1,
+            'metadata.last_commit': 1,
+            'updated_at': 1
+        })
+        
+        webhook_services = []
+        for service in services:
+            webhook_services.append({
+                'name': service['name'],
+                'repo_url': service.get('repo_url'),
+                'current_image_tag': service.get('metadata', {}).get('image_tag', 'latest'),
+                'last_commit': service.get('metadata', {}).get('last_commit'),
+                'updated_at': service.get('updated_at'),
+                'webhook_url': f"http://localhost:3050/api/github/webhook"
+            })
+        
+        return jsonify({
+            'success': True,
+            'total_services': len(webhook_services),
+            'services': webhook_services
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     import os
