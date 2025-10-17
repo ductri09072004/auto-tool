@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
       - name: {SERVICE_NAME}
-        image: ghcr.io/ductri09072004/{SERVICE_NAME}:latest
+        image: ghcr.io/ductri09072004/{SERVICE_NAME}:{IMAGE_TAG}
         imagePullPolicy: Always
         ports:
         - containerPort: {PORT}

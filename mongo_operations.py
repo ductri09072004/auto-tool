@@ -468,22 +468,22 @@ class MongoOperations:
                     'data': {}
                 },
                 
-                # ArgoCD Application info
-                'argocd_application': {
-                    'name': service_name,
-                    'namespace': 'argocd',
-                    'project': 'default',
-                    'target_revision': 'HEAD',
-                    'path': ".",  # Plugin sẽ render từ MongoDB
-                    'destination_server': 'https://kubernetes.default.svc',
-                    'destination_namespace': service_data.get('namespace', service_name),
-                    'sync_policy': {
-                        'automated': {
-                            'prune': True,
-                            'self_heal': True
-                        }
-                    }
-                },
+                   # ArgoCD Application info
+                   'argocd_application': {
+                       'name': service_name,
+                       'namespace': 'argocd',
+                       'project': 'default',
+                       'target_revision': 'HEAD',
+                       'path': f"services/{service_name}/k8s",  # Đọc từ YAML files thật
+                       'destination_server': 'https://kubernetes.default.svc',
+                       'destination_namespace': service_data.get('namespace', service_name),
+                       'sync_policy': {
+                           'automated': {
+                               'prune': True,
+                               'self_heal': True
+                           }
+                       }
+                   },
                 
                 # Metadata
                 'metadata': service_data.get('metadata', {

@@ -69,6 +69,14 @@ class ServiceManager:
     def get_collection_stats(self):
         """Get statistics for all collections."""
         return self.mongo_ops.get_collection_stats()
+    
+    def get_service_data(self, service_name):
+        """Get service data from MongoDB"""
+        try:
+            return self.mongo_ops.db.services.find_one({'name': service_name})
+        except Exception as e:
+            print(f"ERROR: Failed to get service data for {service_name}: {e}")
+            return None
 
     def get_services(self, status=None):
         """Get all services or filter by status."""

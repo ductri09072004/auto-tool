@@ -1338,6 +1338,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         if not container_port:
             return {'success': False, 'error': 'Port is required in service_data'}
         service_port = '80'
+        port = container_port  # For template replacement
         health_path = '/api/health'
         domain = 'example.local'
         base_path = '/api'
@@ -1358,6 +1359,9 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         if len(parts) < 2:
             return {'success': False, 'error': f'Invalid Repo A URL: {repo_a_url}'}
         gh_owner, repo_a_name = parts[0], parts[1]
+        
+        # Set repo_url for template replacement
+        repo_url = repo_a_url
 
         image_tag = 'latest' if image_tag_mode == 'latest' else f"{int(time.time())}"
         timestamp = str(int(time.time()))
@@ -1393,41 +1397,80 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                 template_b = fallback
             else:
                 return {'success': False, 'error': f'Template B not found: {template_b}'}
-        # Skip creating services/{SERVICE_NAME}/k8s structure - plugin will render from MongoDB
-        # No need to create YAML files in Repo B anymore
-        print(f"INFO: Skipping YAML file creation for {service_name} - plugin will render from MongoDB")
+        # Create services/{SERVICE_NAME}/k8s structure with YAML files
+        service_dir = os.path.join(clone_dir, 'services', service_name)
+        k8s_dir = os.path.join(service_dir, 'k8s')
+        os.makedirs(k8s_dir, exist_ok=True)
         
-        # No need to replace placeholders since we're not creating YAML files
-        # Plugin will render YAML from MongoDB with correct values
-
+        # Copy template manifests and replace placeholders
+        template_dir = os.path.join(os.path.dirname(__file__), 'templates')
+        k8s_template_dir = os.path.join(template_dir, 'k8s')
         
+        if os.path.exists(k8s_template_dir):
+            # List of YAML files to copy and customize
+            yaml_files = [
+                'deployment.yaml',
+                'service.yaml', 
+                'configmap.yaml',
+                'hpa.yaml',
+                'ingress.yaml',
+                'ingress-gateway.yaml',
+                'namespace.yaml',
+                'secret.yaml',
+                'argocd-application.yaml'
+            ]
+            
+            for yaml_file in yaml_files:
+                src_file = os.path.join(k8s_template_dir, yaml_file)
+                if os.path.exists(src_file):
+                    dst_file = os.path.join(k8s_dir, yaml_file)
+                    
+                    # Read template content
+                    with open(src_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Replace placeholders
+                    content = content.replace('{SERVICE_NAME}', service_name)
+                    content = content.replace('{NAMESPACE}', namespace)
+                    content = content.replace('{PORT}', str(port))
+                    content = content.replace('{REPLICAS}', str(replicas))
+                    content = content.replace('{MIN_REPLICAS}', str(min_replicas))
+                    content = content.replace('{MAX_REPLICAS}', str(max_replicas))
+                    content = content.replace('{CPU_REQUEST}', cpu_request)
+                    content = content.replace('{CPU_LIMIT}', cpu_limit)
+                    content = content.replace('{MEMORY_REQUEST}', memory_request)
+                    content = content.replace('{MEMORY_LIMIT}', memory_limit)
+                    content = content.replace('{REPO_URL}', repo_url)
+                    content = content.replace('{IMAGE_TAG}', image_tag)
+                    
+                    # Write customized content
+                    with open(dst_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    print(f"✅ Created {yaml_file} for {service_name}")
         
-        # Skip auto-configure Prometheus since we're not creating service folders
         # Auto-configure Prometheus
-        # try:
-        #     # Use provided port from service_data
-        #     service_port = int(service_data.get('port'))
-        #     if not service_port:
-        #         return {'success': False, 'error': 'Port is required in service_data'}
-        #     
-        #     # Add Prometheus scrape job
-        #     prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
-        #     
-        #     # Store results for return
-        #     prometheus_result = "✅ Prometheus configured" if prometheus_config_added else "❌ Prometheus config failed"
-        #     
-        # except Exception as e:
-        #     prometheus_result = f"❌ Prometheus error: {str(e)}"
-        
-        # Set default results since we're skipping monitoring setup
-        prometheus_result = "⏭️ Skipped (no files created)"
+        try:
+            # Use provided port from service_data
+            service_port = int(service_data.get('port'))
+            if not service_port:
+                return {'success': False, 'error': 'Port is required in service_data'}
+            
+            # Add Prometheus scrape job
+            prometheus_config_added = add_prometheus_scrape_job(service_name, service_port)
+            
+            # Store results for return
+            prometheus_result = "✅ Prometheus configured" if prometheus_config_added else "❌ Prometheus config failed"
+            
+        except Exception as e:
+            prometheus_result = f"❌ Prometheus error: {str(e)}"
 
-        # Create ArgoCD Application for plugin to work
+        # Create ArgoCD Application pointing to services/{SERVICE_NAME}/k8s
         apps_dir = os.path.join(clone_dir, 'apps')
         os.makedirs(apps_dir, exist_ok=True)
         app_file = os.path.join(apps_dir, f'{service_name}-application.yaml')
         
-        # Create ArgoCD Application content for plugin-based workflow
+        # Create ArgoCD Application content pointing to YAML files
         app_content = f"""apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -1440,9 +1483,7 @@ spec:
   source:
     repoURL: {repo_b_url.replace('.git', '')}
     targetRevision: HEAD
-    path: .
-    plugin:
-      name: mongo-plugin
+    path: services/{service_name}/k8s
   destination:
     server: https://kubernetes.default.svc
     namespace: {namespace}
@@ -1468,13 +1509,13 @@ spec:
         with open(app_file, 'w', encoding='utf-8') as f:
             f.write(app_content)
 
-        # Commit and push ArgoCD Application to Repo B
+        # Commit and push all changes to Repo B
         subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
         subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
         subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
         st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
         if st.stdout.strip():
-            subprocess.run(['git', 'commit', '-m', f'Add ArgoCD Application for {service_name}'], cwd=clone_dir, check=True)
+            subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
         push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
         if push_proc.returncode != 0:
             return {'success': False, 'error': push_proc.stderr}
@@ -1487,7 +1528,133 @@ spec:
             print(f"⚠️  ArgoCD Application deploy failed: {e.stderr.decode()}")
             # Continue anyway - user can apply manually
         
-        print(f"✅ Service '{service_name}' configuration saved to MongoDB - plugin will handle deployment")
+        print(f"✅ Service '{service_name}' created with YAML manifests in Repo B")
+        
+        # Schedule deletion of YAML files after ArgoCD sync (in background)
+        import threading
+        
+        def delete_yaml_files_after_sync(service_name, repo_b_url):
+            """Delete YAML files after ArgoCD has synced"""
+            try:
+                import time
+                import tempfile
+                import shutil
+                
+                # Wait for ArgoCD to sync with intelligent checking
+                max_wait_time = 300  # 5 minutes maximum
+                check_interval = 30  # Check every 30 seconds
+                waited_time = 0
+                
+                while waited_time < max_wait_time:
+                    time.sleep(check_interval)
+                    waited_time += check_interval
+                    
+                    # Check multiple status indicators
+                    all_good = True
+                    
+                    # 1. Check ArgoCD sync status
+                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
+                                                 capture_output=True, text=True)
+                    argocd_synced = argocd_result.returncode == 0 and argocd_result.stdout.strip() == 'Synced'
+                    
+                    # 2. Check if pods are running
+                    pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                               capture_output=True, text=True)
+                    pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
+                    
+                    # 3. Check if deployment is ready
+                    deployment_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'jsonpath={.status.readyReplicas}'], 
+                                                     capture_output=True, text=True)
+                    deployment_ready = deployment_result.returncode == 0 and deployment_result.stdout.strip().isdigit() and int(deployment_result.stdout.strip()) > 0
+                    
+                    print(f"⏳ Status check for {service_name} (waited {waited_time}s):")
+                    print(f"   - ArgoCD Synced: {'✅' if argocd_synced else '❌'}")
+                    print(f"   - Pods Running: {'✅' if pods_running else '❌'}")
+                    print(f"   - Deployment Ready: {'✅' if deployment_ready else '❌'}")
+                    
+                    # All checks must pass
+                    if argocd_synced and pods_running and deployment_ready:
+                        print(f"✅ All checks passed for {service_name} after {waited_time} seconds")
+                        break
+                    else:
+                        print(f"⏳ Still waiting for {service_name} to be fully ready...")
+                
+                # Final check after max wait time
+                if waited_time >= max_wait_time:
+                    print(f"⚠️ ArgoCD sync timeout for {service_name} after {max_wait_time} seconds, proceeding anyway...")
+                
+                # Final comprehensive check before proceeding
+                final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
+                                                   capture_output=True, text=True)
+                final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                 capture_output=True, text=True)
+                
+                argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
+                pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
+                
+                if argocd_final and pods_final:
+                    # ArgoCD has synced, safe to delete YAML files
+                    print(f"🔄 ArgoCD synced successfully for {service_name}, deleting YAML files...")
+                    
+                    # Delete YAML files from Repo B
+                    yaml_files_to_delete = [
+                        'deployment.yaml',
+                        'service.yaml', 
+                        'configmap.yaml',
+                        'hpa.yaml',
+                        'ingress.yaml',
+                        'ingress-gateway.yaml',
+                        'namespace.yaml',
+                        'secret.yaml',
+                        'argocd-application.yaml'
+                    ]
+                    
+                    # Clone repo again for deletion
+                    temp_dir = tempfile.gettempdir()
+                    clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete')
+                    subprocess.run(['git', 'clone', repo_b_url, clone_dir], check=True)
+                    
+                    # Delete each YAML file
+                    for yaml_file in yaml_files_to_delete:
+                        file_path = os.path.join(clone_dir, 'services', service_name, 'k8s', yaml_file)
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"🗑️ Deleted {yaml_file}")
+                    
+                    # Remove the entire k8s directory if empty
+                    k8s_dir = os.path.join(clone_dir, 'services', service_name, 'k8s')
+                    if os.path.exists(k8s_dir) and not os.listdir(k8s_dir):
+                        os.rmdir(k8s_dir)
+                        print(f"🗑️ Deleted empty k8s directory")
+                    
+                    # Remove services directory if empty
+                    service_dir = os.path.join(clone_dir, 'services', service_name)
+                    if os.path.exists(service_dir) and not os.listdir(service_dir):
+                        os.rmdir(service_dir)
+                        print(f"🗑️ Deleted empty service directory")
+                    
+                    # Commit and push deletion
+                    subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+                    subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+                    subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+                    
+                    st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+                    if st.stdout.strip():
+                        subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, check=True)
+                        print(f"✅ Cleaned up YAML files for {service_name}")
+                    
+                    # Cleanup temp directory
+                    shutil.rmtree(clone_dir)
+                else:
+                    print(f"⚠️ ArgoCD sync not completed for {service_name}, keeping YAML files")
+                    
+            except Exception as e:
+                print(f"❌ Error in delete_yaml_files_after_sync: {e}")
+        
+        # Start background thread to delete YAML files
+        delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
+        delete_thread.start()
 
         return {
             'success': True,
@@ -1531,6 +1698,240 @@ def port_forward_status():
             return jsonify({'status': 'stopped', 'message': 'Port-forward is not running'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/service/recreate-yaml/<service_name>', methods=['POST'])
+def recreate_yaml_from_mongo(service_name):
+    """Recreate YAML files from MongoDB data when Repo A code changes"""
+    try:
+        # Get service data from MongoDB
+        service_data = service_manager.get_service_data(service_name)
+        if not service_data:
+            return jsonify({'error': f'Service {service_name} not found in MongoDB'}), 404
+        
+        # Extract required data for generate_repo_b
+        repo_a_url = service_data.get('repo_url', f'https://github.com/ductri09072004/{service_name}.git')
+        repo_b_url = service_data.get('metadata', {}).get('repo_b_url', 'https://github.com/ductri09072004/demo_fiss1_B.git')
+        repo_b_path = service_data.get('argocd_application', {}).get('path', f'services/{service_name}/k8s')
+        namespace = service_data.get('namespace', service_name)
+        
+        # Prepare service_data in the format expected by generate_repo_b
+        formatted_service_data = {
+            'service_name': service_name,
+            'port': service_data.get('port', 5001),
+            'replicas': service_data.get('replicas', 3),
+            'min_replicas': service_data.get('min_replicas', 2),
+            'max_replicas': service_data.get('max_replicas', 10),
+            'cpu_request': service_data.get('cpu_request', '100m'),
+            'cpu_limit': service_data.get('cpu_limit', '200m'),
+            'memory_request': service_data.get('memory_request', '128Mi'),
+            'memory_limit': service_data.get('memory_limit', '256Mi')
+        }
+        
+        # Get actual image tag from service data or generate from timestamp
+        image_tag = service_data.get('metadata', {}).get('image_tag')
+        if not image_tag:
+            # Generate tag from current timestamp if not available
+            import time
+            image_tag = f"main-{int(time.time())}"
+        
+        # Use the existing generate_repo_b function
+        result = generate_repo_b(
+            formatted_service_data, 
+            repo_a_url, 
+            repo_b_url, 
+            repo_b_path, 
+            namespace, 
+            image_tag  # Use actual image tag
+        )
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': f'YAML files recreated for {service_name} from MongoDB data',
+                'service_name': service_name,
+                'details': {
+                    'repo_a_url': repo_a_url,
+                    'repo_b_url': repo_b_url,
+                    'namespace': namespace,
+                    'note': 'ArgoCD will automatically sync the new YAML files'
+                }
+            })
+        else:
+            return jsonify({'error': result.get('error', 'Failed to recreate YAML files')}), 500
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/service/update-from-repo-a/<service_name>', methods=['POST'])
+def update_service_from_repo_a(service_name):
+    """Update service when Repo A code changes - triggers YAML recreation"""
+    try:
+        # First recreate YAML files from MongoDB
+        recreate_result = recreate_yaml_from_mongo(service_name)
+        
+        if recreate_result[1] != 200:  # Check if recreate failed
+            return recreate_result
+        
+        # Get the response data
+        recreate_data = recreate_result[0].get_json()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Service {service_name} updated from Repo A changes',
+            'service_name': service_name,
+            'yaml_recreation': recreate_data,
+            'next_steps': [
+                'YAML files have been recreated in Repo B',
+                'ArgoCD will automatically detect changes',
+                'New image will be deployed to Kubernetes',
+                'YAML files will be cleaned up after deployment'
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/service/update-image-tag/<service_name>', methods=['POST'])
+def update_service_image_tag(service_name):
+    """Update service image tag from CI/CD pipeline"""
+    try:
+        data = request.get_json()
+        image_tag = data.get('image_tag') or data.get('tag')
+        
+        if not image_tag:
+            return jsonify({'error': 'image_tag is required'}), 400
+        
+        # Update MongoDB with new image tag
+        service_manager.mongo_ops.db.services.update_one(
+            {'name': service_name},
+            {'$set': {'metadata.image_tag': image_tag, 'updated_at': datetime.utcnow().isoformat()}}
+        )
+        
+        # Log the update
+        service_manager.mongo_ops.db.service_events.insert_one({
+            'service_name': service_name,
+            'event_type': 'image_tag_updated',
+            'event_data': {'image_tag': image_tag},
+            'timestamp': datetime.utcnow().isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Image tag updated for {service_name}',
+            'service_name': service_name,
+            'image_tag': image_tag
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/service/get-image-tag/<service_name>', methods=['GET'])
+def get_service_image_tag(service_name):
+    """Get current image tag for service"""
+    try:
+        service_data = service_manager.get_service_data(service_name)
+        if not service_data:
+            return jsonify({'error': f'Service {service_name} not found'}), 404
+        
+        image_tag = service_data.get('metadata', {}).get('image_tag', 'latest')
+        
+        return jsonify({
+            'service_name': service_name,
+            'image_tag': image_tag,
+            'image_url': f"ghcr.io/ductri09072004/{service_name}:{image_tag}"
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/github/webhook', methods=['POST'])
+def github_webhook():
+    """Handle GitHub webhook for Repo A changes"""
+    try:
+        # Get GitHub signature for verification
+        signature = request.headers.get('X-Hub-Signature-256', '')
+        if not verify_github_signature(request.data, signature):
+            return jsonify({'error': 'Invalid signature'}), 401
+        
+        # Parse webhook payload
+        payload = request.get_json()
+        event_type = request.headers.get('X-GitHub-Event')
+        
+        if event_type == 'push':
+            # Extract repository information
+            repo_name = payload['repository']['name']
+            branch = payload['ref'].split('/')[-1]  # Extract branch from refs/heads/main
+            
+            # Only process main/master branch pushes
+            if branch in ['main', 'master']:
+                # Extract commit info
+                commit_sha = payload['head_commit']['id']
+                commit_short = commit_sha[:7]
+                image_tag = f"main-{commit_short}"
+                
+                print(f"🔄 GitHub webhook: {repo_name} pushed to {branch} (commit: {commit_short})")
+                
+                # Update image tag in MongoDB
+                service_manager.mongo_ops.db.services.update_one(
+                    {'name': repo_name},
+                    {'$set': {
+                        'metadata.image_tag': image_tag,
+                        'metadata.last_commit': commit_sha,
+                        'updated_at': datetime.utcnow().isoformat()
+                    }}
+                )
+                
+                # Log the event
+                service_manager.mongo_ops.db.service_events.insert_one({
+                    'service_name': repo_name,
+                    'event_type': 'github_push',
+                    'event_data': {
+                        'commit_sha': commit_sha,
+                        'image_tag': image_tag,
+                        'branch': branch
+                    },
+                    'timestamp': datetime.utcnow().isoformat()
+                })
+                
+                # Trigger YAML recreation
+                recreate_result = recreate_yaml_from_mongo(repo_name)
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Webhook processed for {repo_name}',
+                    'service_name': repo_name,
+                    'image_tag': image_tag,
+                    'yaml_recreation': recreate_result[0].get_json() if recreate_result[1] == 200 else None
+                })
+        
+        return jsonify({'message': 'Webhook received but no action taken'}), 200
+        
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def verify_github_signature(payload, signature):
+    """Verify GitHub webhook signature"""
+    try:
+        import hmac
+        import hashlib
+        
+        webhook_secret = os.getenv('GITHUB_WEBHOOK_SECRET', 'your-secret-here')
+        
+        if not webhook_secret or webhook_secret == 'your-secret-here':
+            print("⚠️ GitHub webhook secret not configured, skipping verification")
+            return True  # Skip verification in development
+        
+        expected_signature = 'sha256=' + hmac.new(
+            webhook_secret.encode('utf-8'),
+            payload,
+            hashlib.sha256
+        ).hexdigest()
+        
+        return hmac.compare_digest(signature, expected_signature)
+    except Exception as e:
+        print(f"❌ Signature verification error: {e}")
+        return False
 
 if __name__ == '__main__':
     import os
