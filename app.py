@@ -1614,6 +1614,11 @@ spec:
                     # Clone repo again for deletion
                     temp_dir = tempfile.gettempdir()
                     clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete')
+                    
+                    # Remove existing directory if it exists
+                    if os.path.exists(clone_dir):
+                        shutil.rmtree(clone_dir)
+                    
                     subprocess.run(['git', 'clone', repo_b_url, clone_dir], check=True)
                     
                     # Delete each YAML file
@@ -1759,20 +1764,21 @@ def recreate_yaml_from_mongo(service_name):
                     
                     while time.time() - start_time < 300:  # Wait up to 5 minutes
                         try:
-                            # Check ArgoCD sync status
-                            import requests
-                            argocd_response = requests.get(
-                                f"https://argocd-server/api/v1/applications/{service_name}",
-                                timeout=10
-                            )
+                            # Check ArgoCD sync status using kubectl
+                            try:
+                                import subprocess
+                                argocd_result = subprocess.run(
+                                    ['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'],
+                                    capture_output=True, text=True, timeout=10
+                                )
+                                sync_status = argocd_result.stdout.strip() if argocd_result.returncode == 0 else 'Unknown'
+                            except Exception as kubectl_error:
+                                print(f"Kubectl check failed: {kubectl_error}")
+                                sync_status = 'Unknown'
                             
-                            if argocd_response.status_code == 200:
-                                argocd_data = argocd_response.json()
-                                sync_status = argocd_data.get('status', {}).get('sync', {}).get('status')
-                                
-                                if sync_status == 'Synced':
-                                    # Check if pods are running
-                                    import subprocess
+                            if sync_status == 'Synced':
+                                # Check if pods are running
+                                try:
                                     kubectl_cmd = ['kubectl', 'get', 'pods', '-n', service_name, '-o', 'json']
                                     kubectl_result = subprocess.run(kubectl_cmd, capture_output=True, text=True)
                                     
@@ -1805,6 +1811,10 @@ def recreate_yaml_from_mongo(service_name):
                                                 tmpdir = tempfile.mkdtemp(prefix='delete_yaml_')
                                                 clone_dir = os.path.join(tmpdir, 'repo')
                                                 
+                                                # Remove existing directory if it exists
+                                                if os.path.exists(clone_dir):
+                                                    shutil.rmtree(clone_dir)
+                                                
                                                 clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
                                                                           capture_output=True, text=True)
                                                 if clone_proc.returncode == 0:
@@ -1826,6 +1836,8 @@ def recreate_yaml_from_mongo(service_name):
                                                 # Cleanup
                                                 shutil.rmtree(tmpdir)
                                                 return
+                                except Exception as pod_check_error:
+                                    print(f"Error checking pods: {pod_check_error}")
                             
                         except Exception as check_error:
                             print(f"Error checking ArgoCD status: {check_error}")
@@ -1971,6 +1983,30 @@ def test_simple():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/debug-headers', methods=['GET', 'POST'])
+def debug_headers():
+    """Debug endpoint to check request headers and content type"""
+    try:
+        debug_info = {
+            'method': request.method,
+            'content_type': request.content_type,
+            'headers': dict(request.headers),
+            'is_json': request.is_json,
+            'content_length': request.content_length,
+            'raw_data': request.get_data(as_text=True)[:500] if request.get_data() else None
+        }
+        
+        if request.is_json:
+            debug_info['json_data'] = request.get_json()
+        
+        return jsonify({
+            'success': True,
+            'debug_info': debug_info
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/github/webhook-debug', methods=['POST'])
 def github_webhook_debug():
     """Debug version of GitHub webhook - simplified"""
@@ -2026,14 +2062,45 @@ def github_webhook_debug():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# Global lock để tránh conflict khi nhiều service cùng tạo
+import threading
+webhook_lock = threading.Lock()
+
 @app.route('/api/github/webhook', methods=['POST'])
 def github_webhook():
     """Handle GitHub webhook for Repo A changes - Simplified version"""
     try:
         print("GitHub webhook called")
+        print(f"Content-Type: {request.content_type}")
+        print(f"Headers: {dict(request.headers)}")
         
-        # Parse webhook payload
-        payload = request.get_json()
+        # Parse webhook payload - handle different content types
+        payload = None
+        if request.is_json:
+            payload = request.get_json()
+        elif request.content_type == 'application/x-www-form-urlencoded':
+            # GitHub sends webhook as form data with 'payload' field
+            form_data = request.form
+            if 'payload' in form_data:
+                try:
+                    import json
+                    payload = json.loads(form_data['payload'])
+                    print(f"Parsed payload from form data")
+                except Exception as e:
+                    print(f"Failed to parse form payload: {e}")
+                    return jsonify({'error': 'Invalid form payload'}), 400
+            else:
+                print("No 'payload' field in form data")
+                return jsonify({'error': 'No payload field in form data'}), 400
+        else:
+            # Try to parse as JSON from raw data
+            try:
+                import json
+                payload = json.loads(request.get_data(as_text=True))
+            except Exception as e:
+                print(f"Failed to parse JSON: {e}")
+                return jsonify({'error': 'Invalid JSON payload'}), 400
+        
         print(f"Payload: {payload}")
         
         if not payload:
