@@ -1598,61 +1598,108 @@ spec:
                     # ArgoCD has synced, safe to delete YAML files
                     print(f"ArgoCD synced successfully for {service_name}, deleting YAML files...")
                     
-                    # Delete YAML files from Repo B
-                    yaml_files_to_delete = [
-                        'deployment.yaml',
-                        'service.yaml', 
-                        'configmap.yaml',
-                        'hpa.yaml',
-                        'ingress.yaml',
-                        'ingress-gateway.yaml',
-                        'namespace.yaml',
-                        'secret.yaml',
-                        'argocd-application.yaml'
-                    ]
-                    
-                    # Clone repo again for deletion
-                    temp_dir = tempfile.gettempdir()
-                    clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete')
-                    
-                    # Remove existing directory if it exists
-                    if os.path.exists(clone_dir):
+                    try:
+                        # Delete YAML files from Repo B
+                        yaml_files_to_delete = [
+                            'deployment.yaml',
+                            'service.yaml', 
+                            'configmap.yaml',
+                            'hpa.yaml',
+                            'ingress.yaml',
+                            'ingress-gateway.yaml',
+                            'namespace.yaml',
+                            'secret.yaml',
+                            'argocd-application.yaml'
+                        ]
+                        
+                        # Clone repo again for deletion
+                        temp_dir = tempfile.gettempdir()
+                        clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
+                        
+                        # Remove existing directory if it exists
+                        if os.path.exists(clone_dir):
+                            shutil.rmtree(clone_dir)
+                        
+                        print(f"Cloning repository to: {clone_dir}")
+                        clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                  capture_output=True, text=True, timeout=60)
+                        
+                        if clone_proc.returncode != 0:
+                            print(f"Failed to clone repository: {clone_proc.stderr}")
+                            return
+                        
+                        # Check if service directory exists
+                        service_path = f"services/{service_name}/k8s"
+                        full_service_path = os.path.join(clone_dir, service_path)
+                        
+                        if not os.path.exists(full_service_path):
+                            print(f"Service directory not found: {service_path}")
+                            return
+                        
+                        # Delete each YAML file
+                        deleted_files = []
+                        for yaml_file in yaml_files_to_delete:
+                            file_path = os.path.join(full_service_path, yaml_file)
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                deleted_files.append(yaml_file)
+                                print(f"Deleted {yaml_file}")
+
+                        # Also delete the ArgoCD Application file under apps/
+                        apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                        if os.path.exists(apps_file):
+                            os.remove(apps_file)
+                            deleted_files.append(f'apps/{service_name}-application.yaml')
+                            print(f"Deleted apps/{service_name}-application.yaml")
+                        
+                        if not deleted_files:
+                            print("No YAML files found to delete")
+                            return
+                        
+                        # Remove empty directories
+                        remaining_files = os.listdir(full_service_path)
+                        if not remaining_files:
+                            os.rmdir(full_service_path)
+                            print(f"Deleted empty k8s directory")
+                            
+                            # Check if services directory is empty
+                            service_dir = os.path.join(clone_dir, 'services', service_name)
+                            if os.path.exists(service_dir) and not os.listdir(service_dir):
+                                os.rmdir(service_dir)
+                                print(f"Deleted empty service directory")
+                        
+                        # Commit and push deletion
+                        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+                        
+                        # Check if there are changes
+                        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+                        if st.stdout.strip():
+                            commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
+                                                       cwd=clone_dir, capture_output=True, text=True)
+                            
+                            if commit_proc.returncode == 0:
+                                push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
+                                                        cwd=clone_dir, capture_output=True, text=True)
+                                
+                                if push_proc.returncode == 0:
+                                    print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
+                                else:
+                                    print(f"❌ Failed to push changes: {push_proc.stderr}")
+                            else:
+                                print(f"❌ Failed to commit changes: {commit_proc.stderr}")
+                        else:
+                            print("No changes to commit")
+                        
+                        # Cleanup temp directory
                         shutil.rmtree(clone_dir)
-                    
-                    subprocess.run(['git', 'clone', repo_b_url, clone_dir], check=True)
-                    
-                    # Delete each YAML file
-                    for yaml_file in yaml_files_to_delete:
-                        file_path = os.path.join(clone_dir, 'services', service_name, 'k8s', yaml_file)
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                            print(f"Deleted {yaml_file}")
-                    
-                    # Remove the entire k8s directory if empty
-                    k8s_dir = os.path.join(clone_dir, 'services', service_name, 'k8s')
-                    if os.path.exists(k8s_dir) and not os.listdir(k8s_dir):
-                        os.rmdir(k8s_dir)
-                        print(f"Deleted empty k8s directory")
-                    
-                    # Remove services directory if empty
-                    service_dir = os.path.join(clone_dir, 'services', service_name)
-                    if os.path.exists(service_dir) and not os.listdir(service_dir):
-                        os.rmdir(service_dir)
-                        print(f"Deleted empty service directory")
-                    
-                    # Commit and push deletion
-                    subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-                    subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-                    subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-                    
-                    st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-                    if st.stdout.strip():
-                        subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, check=True)
-                        print(f"Cleaned up YAML files for {service_name}")
-                    
-                    # Cleanup temp directory
-                    shutil.rmtree(clone_dir)
+                        print(f"Cleaned up temp directory")
+                        
+                    except Exception as cleanup_error:
+                        print(f"❌ Error during YAML cleanup: {cleanup_error}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     print(f"ArgoCD sync not completed for {service_name}, keeping YAML files")
                     
@@ -1824,6 +1871,12 @@ def recreate_yaml_from_mongo(service_name):
                                                         if os.path.exists(file_path):
                                                             os.remove(file_path)
                                                             print(f"Deleted {yaml_file}")
+
+                                                    # Also delete the ArgoCD Application file under apps/
+                                                    apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                                                    if os.path.exists(apps_file):
+                                                        os.remove(apps_file)
+                                                        print(f"Deleted apps/{service_name}-application.yaml")
                                                     
                                                     # Commit and push changes
                                                     subprocess.run(['git', 'add', '.'], cwd=clone_dir)
@@ -2168,25 +2221,33 @@ def github_webhook():
                     })
                     print(f"Logged event for {repo_name}")
                     
-                    # Trigger YAML recreation
+                    # Generate YAML templates from MongoDB data
                     try:
-                        print(f"Starting YAML recreation for {repo_name}...")
-                        recreate_response = recreate_yaml_from_mongo(repo_name)
+                        print(f"Generating YAML templates from MongoDB for {repo_name}...")
+                        yaml_generation_success = service_manager.generate_yaml_from_mongo(repo_name)
+                        print(f"YAML generation result: {yaml_generation_success}")
                         
-                        # Check if it's a successful response
-                        if hasattr(recreate_response, 'get_json'):
-                            response_data = recreate_response.get_json()
-                            yaml_recreation_success = response_data.get('success', False)
-                            print(f"YAML recreation result: {yaml_recreation_success}")
+                        if yaml_generation_success:
+                            print(f"YAML templates generated successfully for {repo_name}")
+                            # Materialize YAML files into Repo B so ArgoCD can sync
+                            try:
+                                print(f"Materializing YAML files to Repo B for {repo_name}...")
+                                materialize_response = recreate_yaml_from_mongo(repo_name)
+                                if hasattr(materialize_response, 'get_json'):
+                                    mjson = materialize_response.get_json()
+                                    print(f"Materialize result: success={mjson.get('success')} error={mjson.get('error')}")
+                                else:
+                                    print("Materialize response not JSON-compatible")
+                            except Exception as mat_err:
+                                print(f"Materialize YAML failed for {repo_name}: {mat_err}")
                         else:
-                            yaml_recreation_success = False
-                            print("YAML recreation returned invalid response format")
+                            print(f"Failed to generate YAML templates for {repo_name}")
                             
                     except Exception as e:
-                        print(f"YAML recreation failed for {repo_name}: {e}")
+                        print(f"YAML generation failed for {repo_name}: {e}")
                         import traceback
                         traceback.print_exc()
-                        yaml_recreation_success = False
+                        yaml_generation_success = False
                     
                     print(f"Webhook processing completed for {repo_name}")
                     
@@ -2195,7 +2256,7 @@ def github_webhook():
                         'message': f'Webhook processed for {repo_name}',
                         'service_name': repo_name,
                         'image_tag': image_tag,
-                        'yaml_recreation_success': yaml_recreation_success
+                        'yaml_generation_success': yaml_generation_success
                     })
                     
                 except Exception as mongo_error:
@@ -2268,6 +2329,49 @@ def get_webhook_ready_services():
             'services': webhook_services
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/yaml-templates', methods=['GET'])
+def get_service_yaml_templates(service_name):
+    """Get YAML templates for a service"""
+    try:
+        templates = service_manager.get_yaml_templates_for_service(service_name)
+        return jsonify({
+            'success': True,
+            'service_name': service_name,
+            'templates': templates
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/generate-yaml', methods=['POST'])
+def generate_service_yaml(service_name):
+    """Generate YAML templates from MongoDB data for a service"""
+    try:
+        result = service_manager.generate_yaml_from_mongo(service_name)
+        if result:
+            return jsonify({
+                'success': True,
+                'message': f'YAML templates generated for {service_name}',
+                'service_name': service_name
+            })
+        else:
+            return jsonify({'error': f'Failed to generate YAML templates for {service_name}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/services/<service_name>/delete-yaml-templates', methods=['DELETE'])
+def delete_service_yaml_templates(service_name):
+    """Delete YAML templates for a service"""
+    try:
+        deleted_count = service_manager.delete_yaml_templates_for_service(service_name)
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {deleted_count} YAML templates for {service_name}',
+            'service_name': service_name,
+            'deleted_count': deleted_count
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

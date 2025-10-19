@@ -176,3 +176,22 @@ class ServiceManager:
 
     def get_manifest_versions(self):
         return list(self.db.manifest_versions.find({}, {'_id': 0}))
+
+    def get_yaml_templates(self):
+        return list(self.db.yaml_templates.find({}, {'_id': 0}))
+
+    def save_yaml_template(self, service_name, template_type, yaml_content, metadata=None):
+        """Save YAML template to MongoDB"""
+        return self.mongo_ops.save_yaml_template(service_name, template_type, yaml_content, metadata)
+
+    def get_yaml_templates_for_service(self, service_name):
+        """Get all YAML templates for a service"""
+        return self.mongo_ops.get_yaml_templates(service_name)
+
+    def delete_yaml_templates_for_service(self, service_name):
+        """Delete all YAML templates for a service"""
+        return self.mongo_ops.delete_yaml_templates(service_name)
+
+    def generate_yaml_from_mongo(self, service_name):
+        """Generate YAML files from MongoDB data and save to templates collection"""
+        return self.mongo_ops.generate_yaml_from_mongo(service_name)

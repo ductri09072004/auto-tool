@@ -21,6 +21,27 @@ class MongoOperations:
         try:
             self.db.services.create_index([('name', ASCENDING)], unique=True)
             self.db.service_events.create_index([('service_name', ASCENDING), ('timestamp', DESCENDING)])
+
+            # Fix yaml_templates indexes: ensure compound unique (service_name, template_type)
+            try:
+                idx_info = self.db.yaml_templates.index_information()
+                # Drop wrong unique index if it exists (unique on service_name only)
+                for idx_name, info in idx_info.items():
+                    keys = info.get('key') or info.get('key_pattern') or []
+                    # keys is list of tuples like [("service_name", 1)]
+                    if keys == [('service_name', 1)] and info.get('unique'):
+                        try:
+                            self.db.yaml_templates.drop_index(idx_name)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Ensure the correct compound unique index
+            try:
+                self.db.yaml_templates.create_index([('service_name', ASCENDING), ('template_type', ASCENDING)], unique=True)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -557,7 +578,7 @@ class MongoOperations:
             collections = [
                 'services', 'service_events', 'deployments', 'k8s_services', 
                 'configmaps', 'hpas', 'ingresses', 'namespaces', 'secrets', 
-                'argocd_applications', 'manifest_versions'
+                'argocd_applications', 'manifest_versions', 'yaml_templates'
             ]
             
             for collection_name in collections:
@@ -568,3 +589,354 @@ class MongoOperations:
         except Exception as e:
             print(f"Error getting collection stats: {e}")
             return {}
+
+    def save_yaml_template(self, service_name, template_type, yaml_content, metadata=None):
+        """Save YAML template to MongoDB"""
+        try:
+            template_doc = {
+                'service_name': service_name,
+                'template_type': template_type,  # deployment, service, configmap, etc.
+                'yaml_content': yaml_content,
+                'metadata': metadata or {},
+                'created_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            
+            self.db.yaml_templates.update_one(
+                {'service_name': service_name, 'template_type': template_type},
+                {'$set': template_doc},
+                upsert=True
+            )
+            
+            return True
+        except Exception as e:
+            print(f"Error saving YAML template: {e}")
+            return False
+
+    def get_yaml_templates(self, service_name):
+        """Get all YAML templates for a service"""
+        try:
+            templates = list(self.db.yaml_templates.find({'service_name': service_name}))
+            return templates
+        except Exception as e:
+            print(f"Error getting YAML templates: {e}")
+            return []
+
+    def delete_yaml_templates(self, service_name):
+        """Delete all YAML templates for a service"""
+        try:
+            result = self.db.yaml_templates.delete_many({'service_name': service_name})
+            return result.deleted_count
+        except Exception as e:
+            print(f"Error deleting YAML templates: {e}")
+            return 0
+
+    def generate_yaml_from_mongo(self, service_name):
+        """Generate YAML files from MongoDB data and save to templates collection"""
+        try:
+            # Get service data from MongoDB
+            service_data = self.db.services.find_one({'name': service_name})
+            if not service_data:
+                print(f"Service {service_name} not found in MongoDB")
+                return False
+            
+            print(f"Generating YAML templates for {service_name} from MongoDB data")
+            
+            # Generate each YAML template
+            templates_created = []
+            
+            # 1. Deployment template
+            deployment_yaml = self._generate_deployment_yaml(service_data)
+            if self.save_yaml_template(service_name, 'deployment', deployment_yaml):
+                templates_created.append('deployment')
+            
+            # 2. Service template
+            service_yaml = self._generate_service_yaml(service_data)
+            if self.save_yaml_template(service_name, 'service', service_yaml):
+                templates_created.append('service')
+            
+            # 3. ConfigMap template
+            configmap_yaml = self._generate_configmap_yaml(service_data)
+            if self.save_yaml_template(service_name, 'configmap', configmap_yaml):
+                templates_created.append('configmap')
+            
+            # 4. HPA template
+            hpa_yaml = self._generate_hpa_yaml(service_data)
+            if self.save_yaml_template(service_name, 'hpa', hpa_yaml):
+                templates_created.append('hpa')
+            
+            # 5. Ingress template
+            ingress_yaml = self._generate_ingress_yaml(service_data)
+            if self.save_yaml_template(service_name, 'ingress', ingress_yaml):
+                templates_created.append('ingress')
+            
+            # 6. Namespace template
+            namespace_yaml = self._generate_namespace_yaml(service_data)
+            if self.save_yaml_template(service_name, 'namespace', namespace_yaml):
+                templates_created.append('namespace')
+            
+            # 7. Secret template
+            secret_yaml = self._generate_secret_yaml(service_data)
+            if self.save_yaml_template(service_name, 'secret', secret_yaml):
+                templates_created.append('secret')
+            
+            # 8. ArgoCD Application template
+            argocd_yaml = self._generate_argocd_yaml(service_data)
+            if self.save_yaml_template(service_name, 'argocd-application', argocd_yaml):
+                templates_created.append('argocd-application')
+            
+            print(f"Generated {len(templates_created)} YAML templates: {templates_created}")
+            return True
+            
+        except Exception as e:
+            print(f"Error generating YAML from MongoDB: {e}")
+            return False
+
+    def _generate_deployment_yaml(self, service_data):
+        """Generate deployment.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        port = service_data.get('port', 5001)
+        replicas = service_data.get('replicas', 3)
+        cpu_request = service_data.get('cpu_request', '100m')
+        cpu_limit = service_data.get('cpu_limit', '200m')
+        memory_request = service_data.get('memory_request', '128Mi')
+        memory_limit = service_data.get('memory_limit', '256Mi')
+        
+        # Get image tag from metadata
+        image_tag = service_data.get('metadata', {}).get('image_tag', 'latest')
+        image = f"ghcr.io/ductri09072004/{service_name}:{image_tag}"
+        
+        deployment_yaml = f"""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {service_name}
+  namespace: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal
+spec:
+  replicas: {replicas}
+  selector:
+    matchLabels:
+      app: {service_name}
+  template:
+    metadata:
+      labels:
+        app: {service_name}
+    spec:
+      containers:
+      - name: {service_name}
+        image: {image}
+        ports:
+        - containerPort: {port}
+        env:
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {service_name}-config
+              key: PORT
+        resources:
+          requests:
+            memory: "{memory_request}"
+            cpu: "{cpu_request}"
+          limits:
+            memory: "{memory_limit}"
+            cpu: "{cpu_limit}"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: {port}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: {port}
+          initialDelaySeconds: 5
+          periodSeconds: 5"""
+        
+        return deployment_yaml
+
+    def _generate_service_yaml(self, service_data):
+        """Generate service.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        port = service_data.get('port', 5001)
+        
+        service_yaml = f"""apiVersion: v1
+kind: Service
+metadata:
+  name: {service_name}-service
+  namespace: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: {port}
+    protocol: TCP
+  selector:
+    app: {service_name}"""
+        
+        return service_yaml
+
+    def _generate_configmap_yaml(self, service_data):
+        """Generate configmap.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        port = service_data.get('port', 5001)
+        
+        configmap_yaml = f"""apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {service_name}-config
+  namespace: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal
+data:
+  PORT: "{port}"
+  FLASK_ENV: "production"
+  PYTHONUNBUFFERED: "1" """
+        
+        return configmap_yaml
+
+    def _generate_hpa_yaml(self, service_data):
+        """Generate hpa.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        min_replicas = service_data.get('min_replicas', 2)
+        max_replicas = service_data.get('max_replicas', 10)
+        
+        hpa_yaml = f"""apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {service_name}-hpa
+  namespace: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {service_name}
+  minReplicas: {min_replicas}
+  maxReplicas: {max_replicas}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70"""
+        
+        return hpa_yaml
+
+    def _generate_ingress_yaml(self, service_data):
+        """Generate ingress.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        
+        ingress_yaml = f"""apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {service_name}-ingress
+  namespace: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: {service_name}.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {service_name}-service
+            port:
+              number: 80"""
+        
+        return ingress_yaml
+
+    def _generate_namespace_yaml(self, service_data):
+        """Generate namespace.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        
+        namespace_yaml = f"""apiVersion: v1
+kind: Namespace
+metadata:
+  name: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal"""
+        
+        return namespace_yaml
+
+    def _generate_secret_yaml(self, service_data):
+        """Generate secret.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        
+        secret_yaml = f"""apiVersion: v1
+kind: Secret
+metadata:
+  name: {service_name}-secret
+  namespace: {namespace}
+  labels:
+    app: {service_name}
+    managed-by: dev-portal
+type: Opaque
+data: {{}}"""
+        
+        return secret_yaml
+
+    def _generate_argocd_yaml(self, service_data):
+        """Generate argocd-application.yaml from MongoDB data"""
+        service_name = service_data['name']
+        namespace = service_data.get('namespace', service_name)
+        repo_b_url = service_data.get('metadata', {}).get('repo_b_url', 'https://github.com/ductri09072004/demo_fiss1_B')
+        
+        argocd_yaml = f"""apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {service_name}
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {repo_b_url}
+    targetRevision: HEAD
+    path: services/{service_name}/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {namespace}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    - RespectIgnoreDifferences=true
+    - ServerSideApply=true
+    retry:
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+      limit: 5
+  revisionHistoryLimit: 3"""
+        
+        return argocd_yaml
