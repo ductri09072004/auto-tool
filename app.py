@@ -12,7 +12,7 @@ import time
 import threading
 from service_manager import ServiceManager
 from api_db import register_db_api
-from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, DASHBOARD_TOKEN
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, DASHBOARD_TOKEN, WEBHOOK_URL
 
 # Global variable to track port-forward process
 port_forward_process = None
@@ -803,6 +803,14 @@ def create_service():
         result = generate_repository(service_data, repo_url, github_token)
         
         if result['success']:
+            # Create GitHub webhook for the new repository
+            webhook_result = create_github_webhook(repo_url, github_token, WEBHOOK_URL)
+            if webhook_result['success']:
+                print(f"✅ Webhook created for {service_name}: {webhook_result.get('webhook_id')}")
+            else:
+                print(f"⚠️ Warning: Failed to create webhook for {service_name}: {webhook_result.get('error')}")
+                # Continue with service creation even if webhook fails
+            
             # After Repo A ok → update Repo B manifests
             repo_b_res = generate_repo_b(service_data, repo_url, repo_b_url, repo_b_path, namespace, image_tag_mode, github_token)
             if not repo_b_res['success']:
@@ -835,14 +843,29 @@ def create_service():
             result = service_manager.add_service_complete(db_service_data)
             print(f"DEBUG: add_service_complete result: {result}")
             
-            return jsonify({
+            response_data = {
                 'success': True,
                 'message': f'Service "{service_name}" created successfully!',
                 'repo_url': repo_url,
                 'clone_url': repo_url,
                 'repo_b_url': repo_b_url,
                 'repo_b_path': repo_b_path
-            })
+            }
+            
+            # Add webhook information to response
+            if webhook_result['success']:
+                response_data['webhook'] = {
+                    'created': True,
+                    'webhook_id': webhook_result.get('webhook_id'),
+                    'webhook_url': webhook_result.get('webhook_url')
+                }
+            else:
+                response_data['webhook'] = {
+                    'created': False,
+                    'error': webhook_result.get('error')
+                }
+            
+            return jsonify(response_data)
         else:
             return jsonify({
                 'success': False,
@@ -854,6 +877,71 @@ def create_service():
             'success': False,
             'error': f'An error occurred: {str(e)}'
         }), 500
+
+def create_github_webhook(repo_url, github_token, webhook_url):
+    """Create GitHub webhook for the repository"""
+    try:
+        # Extract owner and repo name from URL
+        # Support both https://github.com/owner/repo and https://github.com/owner/repo.git
+        if repo_url.endswith('.git'):
+            repo_url = repo_url[:-4]
+        
+        # Parse URL to get owner and repo name
+        import re
+        match = re.search(r'github\.com/([^/]+)/([^/]+)', repo_url)
+        if not match:
+            return {'success': False, 'error': 'Invalid GitHub repository URL'}
+        
+        owner = match.group(1)
+        repo_name = match.group(2)
+        
+        # GitHub API endpoint for creating webhook
+        api_url = f'https://api.github.com/repos/{owner}/{repo_name}/hooks'
+        
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        }
+        
+        # Webhook configuration
+        webhook_data = {
+            'name': 'web',
+            'active': True,
+            'events': ['push'],  # Only listen to push events
+            'config': {
+                'url': webhook_url,
+                'content_type': 'form'  # GitHub sends webhook as form data
+            }
+        }
+        
+        print(f"Creating webhook for {owner}/{repo_name} with URL: {webhook_url}")
+        
+        response = requests.post(api_url, headers=headers, json=webhook_data, timeout=30)
+        
+        if response.status_code == 201:
+            webhook_info = response.json()
+            print(f"✅ Webhook created successfully: {webhook_info.get('id')}")
+            return {
+                'success': True, 
+                'webhook_id': webhook_info.get('id'),
+                'webhook_url': webhook_info.get('config', {}).get('url')
+            }
+        else:
+            error_msg = f"Failed to create webhook: {response.status_code}"
+            try:
+                error_detail = response.json()
+                error_msg += f" - {error_detail.get('message', 'Unknown error')}"
+            except:
+                error_msg += f" - {response.text}"
+            
+            print(f"❌ {error_msg}")
+            return {'success': False, 'error': error_msg}
+            
+    except Exception as e:
+        error_msg = f"Exception while creating webhook: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {'success': False, 'error': error_msg}
 
 def generate_repository(service_data, repo_url, github_token=None):
     """Generate repository from E:\\Study\\demo_fiss1 template and push to provided GitHub repo URL"""
@@ -1536,11 +1624,18 @@ spec:
         import threading
         
         def delete_yaml_files_after_sync(service_name, repo_b_url):
-            """Delete YAML files after ArgoCD has synced"""
+            """Delete YAML files after ArgoCD has synced with new changes"""
             try:
                 import time
                 import tempfile
                 import shutil
+                import json
+                
+                # Track sync states to detect actual changes
+                last_sync_status = None
+                last_health_status = None
+                last_revision = None
+                sync_changed = False
                 
                 # Wait for ArgoCD to sync with intelligent checking
                 max_wait_time = 300  # 5 minutes maximum
@@ -1551,35 +1646,65 @@ spec:
                     time.sleep(check_interval)
                     waited_time += check_interval
                     
-                    # Check multiple status indicators
-                    all_good = True
-                    
-                    # 1. Check ArgoCD sync status
-                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
-                                                 capture_output=True, text=True)
-                    argocd_synced = argocd_result.returncode == 0 and argocd_result.stdout.strip() == 'Synced'
-                    
-                    # 2. Check if pods are running
-                    pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                               capture_output=True, text=True)
-                    pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
-                    
-                    # 3. Check if deployment is ready
-                    deployment_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'jsonpath={.status.readyReplicas}'], 
-                                                     capture_output=True, text=True)
-                    deployment_ready = deployment_result.returncode == 0 and deployment_result.stdout.strip().isdigit() and int(deployment_result.stdout.strip()) > 0
-                    
-                    print(f"Status check for {service_name} (waited {waited_time}s):")
-                    print(f"   - ArgoCD Synced: {'YES' if argocd_synced else 'NO'}")
-                    print(f"   - Pods Running: {'YES' if pods_running else 'NO'}")
-                    print(f"   - Deployment Ready: {'YES' if deployment_ready else 'NO'}")
-                    
-                    # All checks must pass
-                    if argocd_synced and pods_running and deployment_ready:
-                        print(f"All checks passed for {service_name} after {waited_time} seconds")
-                        break
-                    else:
-                        print(f"Still waiting for {service_name} to be fully ready...")
+                    try:
+                        # Get detailed ArgoCD application status
+                        argocd_result = subprocess.run(
+                            ['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        
+                        if argocd_result.returncode == 0:
+                            app_data = json.loads(argocd_result.stdout)
+                            status = app_data.get('status', {})
+                            
+                            sync_status = status.get('sync', {}).get('status', 'Unknown')
+                            health_status = status.get('health', {}).get('status', 'Unknown')
+                            revision = status.get('sync', {}).get('revision', 'Unknown')
+                            
+                            # Check if sync status or revision has changed (indicating new sync)
+                            if (last_sync_status and last_sync_status != sync_status) or \
+                               (last_revision and last_revision != revision):
+                                sync_changed = True
+                                print(f"ArgoCD sync state changed: {last_sync_status} -> {sync_status}, revision: {last_revision} -> {revision}")
+                            
+                            last_sync_status = sync_status
+                            last_health_status = health_status
+                            last_revision = revision
+                            
+                            print(f"ArgoCD status for {service_name} (waited {waited_time}s): sync={sync_status}, health={health_status}, revision={revision}")
+                            
+                            # Only proceed if we've seen a sync change AND current status is Synced
+                            # Allow Progressing health status for ingress loading
+                            if sync_changed and sync_status == 'Synced' and health_status in ['Healthy', 'Progressing']:
+                                # For Progressing health status (ingress loading), skip pod check and proceed
+                                if health_status == 'Progressing':
+                                    print(f"ArgoCD synced with new changes (ingress loading), deleting YAML files for {service_name}...")
+                                    break
+                                else:
+                                    # For Healthy status, check if pods are running
+                                    pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                               capture_output=True, text=True)
+                                    pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
+                                    
+                                    if pods_running:
+                                        print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
+                                        break
+                                    else:
+                                        print(f"ArgoCD synced but pods not running yet for {service_name}...")
+                            else:
+                                # If no sync change detected yet, continue waiting
+                                if not sync_changed:
+                                    print(f"Waiting for ArgoCD to detect changes for {service_name}...")
+                                else:
+                                    if health_status == 'Progressing':
+                                        print(f"ArgoCD sync changed but ingress still loading: sync={sync_status}, health={health_status}")
+                                    else:
+                                        print(f"ArgoCD sync changed but not ready: sync={sync_status}, health={health_status}")
+                        else:
+                            print(f"Failed to get ArgoCD application status: {argocd_result.stderr}")
+                            
+                    except Exception as kubectl_error:
+                        print(f"Kubectl check failed: {kubectl_error}")
                 
                 # Final check after max wait time
                 if waited_time >= max_wait_time:
@@ -1803,94 +1928,155 @@ def recreate_yaml_from_mongo(service_name):
             import threading
             
             def delete_yaml_files_after_sync(service_name, repo_b_url):
-                """Delete YAML files after ArgoCD has synced"""
+                """Delete YAML files after ArgoCD has synced with new changes"""
                 try:
                     import time
                     start_time = time.time()
                     print(f"Starting background thread to monitor ArgoCD sync for {service_name}")
                     
+                    # Track sync states to detect actual changes
+                    last_sync_status = None
+                    last_health_status = None
+                    last_revision = None
+                    sync_changed = False
+                    
                     while time.time() - start_time < 300:  # Wait up to 5 minutes
                         try:
-                            # Check ArgoCD sync status using kubectl
+                            # Check ArgoCD application status in detail
                             try:
                                 import subprocess
+                                import json
+                                
+                                # Get detailed ArgoCD application status
                                 argocd_result = subprocess.run(
-                                    ['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'],
+                                    ['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'],
                                     capture_output=True, text=True, timeout=10
                                 )
-                                sync_status = argocd_result.stdout.strip() if argocd_result.returncode == 0 else 'Unknown'
+                                
+                                if argocd_result.returncode == 0:
+                                    app_data = json.loads(argocd_result.stdout)
+                                    status = app_data.get('status', {})
+                                    
+                                    sync_status = status.get('sync', {}).get('status', 'Unknown')
+                                    health_status = status.get('health', {}).get('status', 'Unknown')
+                                    revision = status.get('sync', {}).get('revision', 'Unknown')
+                                    
+                                    # Check if sync status or revision has changed (indicating new sync)
+                                    if (last_sync_status and last_sync_status != sync_status) or \
+                                       (last_revision and last_revision != revision):
+                                        sync_changed = True
+                                        print(f"ArgoCD sync state changed: {last_sync_status} -> {sync_status}, revision: {last_revision} -> {revision}")
+                                    
+                                    last_sync_status = sync_status
+                                    last_health_status = health_status
+                                    last_revision = revision
+                                    
+                                    print(f"ArgoCD status for {service_name}: sync={sync_status}, health={health_status}, revision={revision}")
+                                    
+                                    # Only proceed if we've seen a sync change AND current status is Synced
+                                    # Allow Progressing health status for ingress loading
+                                    if sync_changed and sync_status == 'Synced' and health_status in ['Healthy', 'Progressing']:
+                                        # For Progressing health status (ingress loading), skip pod check and proceed
+                                        if health_status == 'Progressing':
+                                            print(f"ArgoCD synced with new changes (ingress loading), deleting YAML files for {service_name}...")
+                                            # Proceed directly to deletion without pod check
+                                            proceed_to_deletion = True
+                                        else:
+                                            # For Healthy status, check if pods are running
+                                            try:
+                                                kubectl_cmd = ['kubectl', 'get', 'pods', '-n', service_name, '-o', 'json']
+                                                kubectl_result = subprocess.run(kubectl_cmd, capture_output=True, text=True)
+                                                
+                                                if kubectl_result.returncode == 0:
+                                                    pods_data = json.loads(kubectl_result.stdout)
+                                                    pods = pods_data.get('items', [])
+                                                    
+                                                    if pods:
+                                                        running_pods = [pod for pod in pods if pod.get('status', {}).get('phase') == 'Running']
+                                                        if len(running_pods) >= 1:  # At least 1 pod running
+                                                            print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
+                                                            proceed_to_deletion = True
+                                                        else:
+                                                            print(f"ArgoCD synced but pods not running yet for {service_name}...")
+                                                            proceed_to_deletion = False
+                                                    else:
+                                                        print(f"No pods found for {service_name}")
+                                                        proceed_to_deletion = False
+                                                else:
+                                                    print(f"Failed to get pods for {service_name}")
+                                                    proceed_to_deletion = False
+                                            except Exception as pod_check_error:
+                                                print(f"Error checking pods: {pod_check_error}")
+                                                proceed_to_deletion = False
+                                        
+                                        # Proceed with deletion if conditions are met
+                                        if proceed_to_deletion:
+                                            # Delete YAML files from Repo B
+                                            yaml_files_to_delete = [
+                                                'deployment.yaml',
+                                                'service.yaml', 
+                                                'configmap.yaml',
+                                                'hpa.yaml',
+                                                'ingress.yaml',
+                                                'ingress-gateway.yaml',
+                                                'secret.yaml',
+                                                'namespace.yaml',
+                                                'argocd-application.yaml'
+                                            ]
+                                            
+                                            # Clone repo and delete files
+                                            import tempfile
+                                            import shutil
+                                            tmpdir = tempfile.mkdtemp(prefix='delete_yaml_')
+                                            clone_dir = os.path.join(tmpdir, 'repo')
+                                            
+                                            # Remove existing directory if it exists
+                                            if os.path.exists(clone_dir):
+                                                shutil.rmtree(clone_dir)
+                                            
+                                            clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                                      capture_output=True, text=True)
+                                            if clone_proc.returncode == 0:
+                                                service_path = f"services/{service_name}/k8s"
+                                                for yaml_file in yaml_files_to_delete:
+                                                    file_path = os.path.join(clone_dir, service_path, yaml_file)
+                                                    if os.path.exists(file_path):
+                                                        os.remove(file_path)
+                                                        print(f"Deleted {yaml_file}")
+
+                                                # Also delete the ArgoCD Application file under apps/
+                                                apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                                                if os.path.exists(apps_file):
+                                                    os.remove(apps_file)
+                                                    print(f"Deleted apps/{service_name}-application.yaml")
+                                                
+                                                # Commit and push changes
+                                                subprocess.run(['git', 'add', '.'], cwd=clone_dir)
+                                                subprocess.run(['git', 'commit', '-m', f'Delete YAML files after ArgoCD sync for {service_name}'], 
+                                                             cwd=clone_dir)
+                                                subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir)
+                                                
+                                                print(f"YAML files deleted successfully for {service_name}")
+                                            
+                                            # Cleanup
+                                            shutil.rmtree(tmpdir)
+                                            return
+                                    
+                                    else:
+                                        # If no sync change detected yet, continue waiting
+                                        if not sync_changed:
+                                            print(f"Waiting for ArgoCD to detect changes for {service_name}...")
+                                        else:
+                                            if health_status == 'Progressing':
+                                                print(f"ArgoCD sync changed but ingress still loading: sync={sync_status}, health={health_status}")
+                                            else:
+                                                print(f"ArgoCD sync changed but not ready: sync={sync_status}, health={health_status}")
+                                
+                                else:
+                                    print(f"Failed to get ArgoCD application status: {argocd_result.stderr}")
+                                    
                             except Exception as kubectl_error:
                                 print(f"Kubectl check failed: {kubectl_error}")
-                                sync_status = 'Unknown'
-                            
-                            if sync_status == 'Synced':
-                                # Check if pods are running
-                                try:
-                                    kubectl_cmd = ['kubectl', 'get', 'pods', '-n', service_name, '-o', 'json']
-                                    kubectl_result = subprocess.run(kubectl_cmd, capture_output=True, text=True)
-                                    
-                                    if kubectl_result.returncode == 0:
-                                        import json
-                                        pods_data = json.loads(kubectl_result.stdout)
-                                        pods = pods_data.get('items', [])
-                                        
-                                        if pods:
-                                            running_pods = [pod for pod in pods if pod.get('status', {}).get('phase') == 'Running']
-                                            if len(running_pods) >= 1:  # At least 1 pod running
-                                                print(f"ArgoCD synced and pods running for {service_name}, deleting YAML files...")
-                                                
-                                                # Delete YAML files from Repo B
-                                                yaml_files_to_delete = [
-                                                    'deployment.yaml',
-                                                    'service.yaml', 
-                                                    'configmap.yaml',
-                                                    'hpa.yaml',
-                                                    'ingress.yaml',
-                                                    'ingress-gateway.yaml',
-                                                    'secret.yaml',
-                                                    'namespace.yaml',
-                                                    'argocd-application.yaml'
-                                                ]
-                                                
-                                                # Clone repo and delete files
-                                                import tempfile
-                                                import shutil
-                                                tmpdir = tempfile.mkdtemp(prefix='delete_yaml_')
-                                                clone_dir = os.path.join(tmpdir, 'repo')
-                                                
-                                                # Remove existing directory if it exists
-                                                if os.path.exists(clone_dir):
-                                                    shutil.rmtree(clone_dir)
-                                                
-                                                clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                                          capture_output=True, text=True)
-                                                if clone_proc.returncode == 0:
-                                                    service_path = f"services/{service_name}/k8s"
-                                                    for yaml_file in yaml_files_to_delete:
-                                                        file_path = os.path.join(clone_dir, service_path, yaml_file)
-                                                        if os.path.exists(file_path):
-                                                            os.remove(file_path)
-                                                            print(f"Deleted {yaml_file}")
-
-                                                    # Also delete the ArgoCD Application file under apps/
-                                                    apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                                                    if os.path.exists(apps_file):
-                                                        os.remove(apps_file)
-                                                        print(f"Deleted apps/{service_name}-application.yaml")
-                                                    
-                                                    # Commit and push changes
-                                                    subprocess.run(['git', 'add', '.'], cwd=clone_dir)
-                                                    subprocess.run(['git', 'commit', '-m', f'Delete YAML files after ArgoCD sync for {service_name}'], 
-                                                                 cwd=clone_dir)
-                                                    subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir)
-                                                    
-                                                    print(f"YAML files deleted successfully for {service_name}")
-                                                
-                                                # Cleanup
-                                                shutil.rmtree(tmpdir)
-                                                return
-                                except Exception as pod_check_error:
-                                    print(f"Error checking pods: {pod_check_error}")
                             
                         except Exception as check_error:
                             print(f"Error checking ArgoCD status: {check_error}")
@@ -2059,6 +2245,57 @@ def debug_headers():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/webhook/check/<path:repo_url>', methods=['GET'])
+def check_webhook(repo_url):
+    """Check existing webhooks for a repository"""
+    try:
+        github_token = request.headers.get('Authorization', '').replace('token ', '')
+        if not github_token:
+            return jsonify({'error': 'GitHub token required in Authorization header'}), 400
+        
+        # Extract owner and repo name from URL
+        if repo_url.endswith('.git'):
+            repo_url = repo_url[:-4]
+        
+        import re
+        match = re.search(r'github\.com/([^/]+)/([^/]+)', repo_url)
+        if not match:
+            return jsonify({'error': 'Invalid GitHub repository URL'}), 400
+        
+        owner = match.group(1)
+        repo_name = match.group(2)
+        
+        # GitHub API endpoint for listing webhooks
+        api_url = f'https://api.github.com/repos/{owner}/{repo_name}/hooks'
+        
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        response = requests.get(api_url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            webhooks = response.json()
+            return jsonify({
+                'success': True,
+                'repository': f'{owner}/{repo_name}',
+                'webhook_count': len(webhooks),
+                'webhooks': webhooks
+            })
+        else:
+            error_msg = f"Failed to fetch webhooks: {response.status_code}"
+            try:
+                error_detail = response.json()
+                error_msg += f" - {error_detail.get('message', 'Unknown error')}"
+            except:
+                error_msg += f" - {response.text}"
+            
+            return jsonify({'success': False, 'error': error_msg}), 500
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/github/webhook-debug', methods=['POST'])
 def github_webhook_debug():

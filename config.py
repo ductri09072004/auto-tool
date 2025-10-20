@@ -30,6 +30,9 @@ GRAFANA_PASS = "admin123"
 GITHUB_ORG = os.getenv('GITHUB_ORG', 'your_organization')
 DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri09072004/demo_fiss1_B')
 
+# Webhook Configuration
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://meagan-submucronate-telephonically.ngrok-free.dev/api/github/webhook')
+
 # Template Paths
 TEMPLATE_A_PATH = r"E:\Study\Auto_project_tool\templates_src\repo_a_template"
 TEMPLATE_B_PATH = r"E:\Study\Auto_project_tool\templates_src\repo_b_template\k8s"
