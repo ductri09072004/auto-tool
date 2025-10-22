@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop ,master]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 env:
   REGISTRY: ghcr.io
@@ -98,25 +98,25 @@ jobs:
   update-manifests:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     permissions:
       contents: write
     
     steps:
+    - name: Verify MANIFESTS_REPO_TOKEN exists
+      run: |
+        if [ -z "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
+          echo "ERROR: MANIFESTS_REPO_TOKEN is required to push to Repo B."
+          echo "Please add it in Settings > Secrets and variables > Actions."
+          exit 1
+        fi
+
     - name: Checkout manifests repo
       uses: actions/checkout@v4
       with:
         repository: ductri09072004/demo_fiss1_B
-        token: ${{ secrets.MANIFESTS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.MANIFESTS_REPO_TOKEN }}
         path: manifests
-        
-    - name: Verify token access
-      run: |
-        if [ -z "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
-          echo "WARNING: MANIFESTS_REPO_TOKEN not set, using GITHUB_TOKEN"
-        else
-          echo "SUCCESS: MANIFESTS_REPO_TOKEN is set"
-        fi
         
     - name: Update image tag
       run: |
@@ -135,7 +135,8 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add .
-        git commit -m "Update demo_fiss1 image to ${{ github.sha }}" || exit 0
+        SERVICE="${{ github.event.repository.name }}"
+        git commit -m "Update $SERVICE image to ${{ github.sha }}" || exit 0
         git push
         
     - name: ArgoCD Auto-Sync
