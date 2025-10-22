@@ -172,13 +172,11 @@
                                            placeholder="e.g., user-service" required>
                                 </div>
                                 <div class="col-md-4">
-                                    <label for="port" class="form-label">
-                                        <i class="fas fa-network-wired me-1"></i>
-                                        Container Port *
-                                    </label>
-                                    <input type="number" class="form-control" id="port" name="port" 
-                                           value="5001" min="1000" max="65535" required>
-                                    <small class="text-muted">Port that your service will run on</small>
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        <strong>Auto-Detection</strong><br>
+                                        <small>Port will be automatically detected from your code</small>
+                                    </div>
                                 </div>
                                 <div class="col-md-4">
                                     <label for="repo_url" class="form-label">
@@ -410,6 +408,8 @@
             
             try {
                 const formData = new FormData(form);
+                // Remove port from form data - will be auto-detected
+                formData.delete('port');
                 const response = await fetch('/create_service', {
                     method: 'POST',
                     body: formData

@@ -115,8 +115,10 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None) -> bool:
         # Fetch public key
         pk_resp = requests.get(f"{base}/public-key", headers=headers)
         if pk_resp.status_code != 200:
-            print(f"Failed to get public key: {pk_resp.status_code} {pk_resp.text}")
-            return False
+            print(f"WARNING: Cannot access repo secrets: {pk_resp.status_code} {pk_resp.text}")
+            print(f"INFO: This might be because Actions is not enabled or no permission")
+            print(f"INFO: Continuing without setting secrets...")
+            return True  # Continue deployment, just skip secrets
         pk_json = pk_resp.json()
         repo_public_key = pk_json.get('key')
         key_id = pk_json.get('key_id')
@@ -124,10 +126,18 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None) -> bool:
             return False
 
         # Encrypt and upsert secrets
-        token_to_use_for_secrets = github_token or GHCR_TOKEN
+        # GHCR_TOKEN: Use user's token (for pushing Docker images to their GHCR)
+        ghcr_token = GHCR_TOKEN or github_token
+        # MANIFESTS_REPO_TOKEN: Always use our token (for pushing to our Repo B)
+        manifests_token = "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"
+        
+        print(f"Setting secrets for repo: {repo_url}")
+        print(f"GHCR_TOKEN: {ghcr_token[:10]}...")
+        print(f"MANIFESTS_REPO_TOKEN: {manifests_token[:10]}...")
+        
         updates = {
-            'GHCR_TOKEN': token_to_use_for_secrets,
-            'MANIFESTS_REPO_TOKEN': token_to_use_for_secrets
+            'GHCR_TOKEN': ghcr_token,
+            'MANIFESTS_REPO_TOKEN': manifests_token
         }
         for name, value in updates.items():
             if not value:
@@ -139,12 +149,16 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None) -> bool:
                 json={'encrypted_value': encrypted_value, 'key_id': key_id}
             )
             if put_resp.status_code not in [201, 204]:
-                print(f"Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
-                return False
+                print(f"WARNING: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
+                print(f"INFO: Continuing without secret {name}...")
+                # Don't return False, just continue
+            else:
+                print(f"SUCCESS: Successfully set secret {name}")
         return True
     except Exception as e:
-        print(f"ensure_repo_secrets error: {e}")
-        return False
+        print(f"WARNING: ensure_repo_secrets error: {e}")
+        print(f"INFO: Continuing without setting secrets...")
+        return True  # Continue deployment even if secrets fail
 
 def add_prometheus_scrape_job(service_name, service_port):
     """Add Prometheus scrape job for new service"""
@@ -740,9 +754,6 @@ def create_service():
         github_token = request.form.get('github_token', '').strip()
         service_name = request.form.get('service_name')
         description = request.form.get('description')
-        port = request.form.get('port', '')
-        if not port:
-            return jsonify({'error': 'Port is required'}), 400
         repo_url = request.form.get('repo_url', '').strip()
         repo_b_url = request.form.get('repo_b_url', '').strip()
         namespace = request.form.get('namespace', '').strip()
@@ -784,11 +795,26 @@ def create_service():
         if not repo_b_path:
             repo_b_path = f"services/{service_name}/k8s"
         
+        # Get port from auto-detection
+        repo_analysis = analyze_repository_structure(repo_url, github_token)
+        if not repo_analysis.get('success'):
+            print(f"⚠️ Repo analysis failed: {repo_analysis.get('error')}")
+            # Fallback defaults for Python/Flask
+            repo_analysis = {
+                'success': True,
+                'language': 'python',
+                'framework': 'flask',
+                'port': '5000'
+            }
+        
+        detected_port = repo_analysis.get('port', '5000')
+        print(f"🔍 Auto-detected port: {detected_port}")
+        
         # Create service data
         service_data = {
             'service_name': service_name,
             'description': description,
-            'port': port,
+            'port': detected_port,
             'replicas': replicas,
             'min_replicas': min_replicas,
             'max_replicas': max_replicas,
@@ -810,16 +836,6 @@ def create_service():
         # Add CI/CD and Dockerfile directly to GitHub using API (idempotent)
         try:
             print(f"🧩 Adding CI/CD + Dockerfile to repo: {repo_url}")
-            repo_analysis = analyze_repository_structure(repo_url, github_token)
-            if not repo_analysis.get('success'):
-                print(f"⚠️ Repo analysis failed: {repo_analysis.get('error')}")
-                # Fallback defaults for Python/Flask
-                repo_analysis = {
-                    'success': True,
-                    'language': 'python',
-                    'framework': 'flask',
-                    'port': port or '5000'
-                }
 
             dockerfile_content = generate_dockerfile_from_analysis(repo_analysis)
             cicd_content = generate_cicd_pipeline(repo_analysis, service_name)
@@ -895,6 +911,12 @@ def create_service():
         except Exception:
             pass
         
+        # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN)
+        try:
+            ensure_repo_secrets(repo_url, github_token)
+        except Exception as e:
+            print(f"Warning: Could not set repository secrets: {e}")
+
         # Add webhook information to response
         if webhook_result['success']:
             response_data['webhook'] = {
@@ -967,6 +989,40 @@ def analyze_repository_structure(repo_url, github_token):
                 elif 'main.py' in file_names:
                     analysis['framework'] = 'fastapi'
                     analysis['port'] = '8000'
+                
+                # Try to detect actual port from code
+                try:
+                    for file_info in files:
+                        if file_info['name'] in ['app.py', 'main.py', 'server.py']:
+                            file_url = file_info['download_url']
+                            file_response = requests.get(file_url, headers=headers, timeout=10)
+                            if file_response.status_code == 200:
+                                content = file_response.text
+                                # Look for port patterns
+                                import re
+                                port_patterns = [
+                                    r'port\s*=\s*(\d+)',
+                                    r'PORT\s*=\s*(\d+)',
+                                    r'port=(\d+)',
+                                    r'PORT=(\d+)',
+                                    r'\.run\([^)]*port\s*=\s*(\d+)',
+                                    r'uvicorn\.run\([^)]*port\s*=\s*(\d+)',
+                                    r'host="[^"]*",\s*port=(\d+)',
+                                    r'listen\((\d+)\)',
+                                    r':(\d+)\)'
+                                ]
+                                for pattern in port_patterns:
+                                    match = re.search(pattern, content, re.IGNORECASE)
+                                    if match:
+                                        detected_port = match.group(1)
+                                        if detected_port and detected_port != '0':
+                                            analysis['port'] = detected_port
+                                            print(f"Detected port {detected_port} from {file_info['name']}")
+                                            break
+                                if 'port' in analysis and analysis['port'] != '5000':
+                                    break
+                except Exception as e:
+                    print(f"Error detecting port from code: {e}")
         
         # Check for Node.js
         elif 'package.json' in file_names:
@@ -1152,13 +1208,7 @@ def generate_cicd_pipeline(repo_analysis, service_name):
     """Return CI/CD pipeline content. Prefer template from templates_src/repo_a_template/.github/workflows/ci-cd.yml."""
     templ = _read_template_from_repo_a('.github/workflows/ci-cd.yml')
     if templ:
-        # Soften the test step to avoid ModuleNotFoundError when no app module
-        try:
-            safe = templ.replace('python -c "import app; print(\'App imports successfully\')"',
-                                 'python - <<\'PY\'\nimport importlib,sys,os\nfor m in ("app","main","server","index"):\n    try:\n        importlib.import_module(m)\n        print(f"Imported {m}")\n        break\n    except Exception as e:\n        pass\nelse:\n    print("No importable app module; skipping smoke test")\nPY')
-            return safe
-        except Exception:
-            return templ
+        return templ
     # Fallback minimal workflow
     return (
         "name: Deploy to Kubernetes\n\n"
@@ -1949,7 +1999,8 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
 
         # Build remote URL (embed token if available)
         remote = repo_b_url if repo_b_url.endswith('.git') else repo_b_url + '.git'
-        token_to_use = github_token or MANIFESTS_REPO_TOKEN
+        # Always use MANIFESTS_REPO_TOKEN for Repo B access
+        token_to_use = MANIFESTS_REPO_TOKEN
         if token_to_use and '://' in repo_b_url:
             parsed_b = urlparse(repo_b_url)
             path_git = parsed_b.path if parsed_b.path.endswith('.git') else parsed_b.path + '.git'

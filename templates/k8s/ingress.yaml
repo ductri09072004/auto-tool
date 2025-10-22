@@ -5,16 +5,11 @@ metadata:
   namespace: {NAMESPACE}
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    external-dns.alpha.kubernetes.io/hostname: jollicow.store
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
-  tls:
-  - hosts:
-    - jollicow.store
-    secretName: {SERVICE_NAME}-tls
+  ingressClassName: nginx
   rules:
-  - host: jollicow.store
+  - host: localhost
     http:
       paths:
       - path: /api

@@ -57,16 +57,14 @@ spec:
             memory: "{MEMORY_LIMIT}"
             cpu: "{CPU_LIMIT}"
         livenessProbe:
-          httpGet:
-            path: /api/health
+          tcpSocket:
             port: {PORT}
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
         readinessProbe:
-          httpGet:
-            path: /api/health
+          tcpSocket:
             port: {PORT}
           initialDelaySeconds: 5
           periodSeconds: 5
