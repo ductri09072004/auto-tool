@@ -2404,9 +2404,11 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         else:
             # Railway deployment - create temporary directory
             service_dir = os.path.join(tmpdir, 'services', service_name)
+            print(f"DEBUG: Creating service directory: {service_dir}")
         
         k8s_dir = os.path.join(service_dir, 'k8s')
         os.makedirs(k8s_dir, exist_ok=True)
+        print(f"DEBUG: Created k8s directory: {k8s_dir}")
         
         # Copy template manifests and replace placeholders
         template_dir = os.path.join(os.path.dirname(__file__), 'templates')
@@ -2462,6 +2464,8 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                 # Write customized content
                 with open(dst_file, 'w', encoding='utf-8') as f:
                     f.write(content)
+                
+                print(f"DEBUG: Created {yaml_file} at {dst_file}")
             
             print(f"Created {yaml_file} for {service_name}")
         
@@ -2552,15 +2556,23 @@ spec:
             
             # Walk through the service directory and collect all files
             service_source_dir = os.path.join(tmpdir, 'services', service_name)
-            for root, dirs, files in os.walk(service_source_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, tmpdir)
-                    
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    
-                    files_to_push[relative_path] = content
+            print(f"DEBUG: Looking for files in {service_source_dir}")
+            print(f"DEBUG: Directory exists: {os.path.exists(service_source_dir)}")
+            
+            if os.path.exists(service_source_dir):
+                for root, dirs, files in os.walk(service_source_dir):
+                    print(f"DEBUG: Found {len(files)} files in {root}")
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(file_path, tmpdir)
+                        print(f"DEBUG: Adding file {relative_path}")
+                        
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        files_to_push[relative_path] = content
+            else:
+                print(f"DEBUG: Service directory {service_source_dir} does not exist!")
             
             # Also add ArgoCD application file
             apps_dir = os.path.join(tmpdir, 'apps')
