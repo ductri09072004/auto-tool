@@ -12,6 +12,11 @@ GHCR_TOKEN = os.getenv('GHCR_TOKEN', '')
 MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
 ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://6faeaf22e11a.ngrok-free.app/api/webhook')
 
+# Debug logging for tokens
+print(f"MANIFESTS_REPO_TOKEN: {'SET' if MANIFESTS_REPO_TOKEN else 'NOT SET'}")
+print(f"GITHUB_TOKEN: {'SET' if GITHUB_TOKEN else 'NOT SET'}")
+print(f"GHCR_TOKEN: {'SET' if GHCR_TOKEN else 'NOT SET'}")
+
 # Dashboard token - can be set for read-only operations
 DASHBOARD_TOKEN = os.getenv('DASHBOARD_TOKEN', '')
 

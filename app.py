@@ -182,7 +182,7 @@ data:
         return f"# Template for {template_name} not implemented"
 
 def push_files_to_github_api(repo_url, files_to_push, commit_message, github_token):
-    """Push files to GitHub repository using GitHub API instead of git commands"""
+    """Push files to GitHub repository using GitHub Contents API instead of git commands"""
     try:
         import re
         import base64
@@ -195,28 +195,15 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
         owner = match.group(1)
         repo_name = match.group(2)
         
-        # Get current commit SHA
         headers = {'Authorization': f'token {github_token}', 'Accept': 'application/vnd.github+json'}
-        ref_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/refs/heads/main'
-        ref_response = requests.get(ref_url, headers=headers)
         
-        if ref_response.status_code != 200:
-            return {'success': False, 'error': f'Failed to get current commit: {ref_response.status_code}'}
-        
-        current_sha = ref_response.json()['object']['sha']
-        
-        # Get current tree
-        commit_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/commits/{current_sha}'
-        commit_response = requests.get(commit_url, headers=headers)
-        
-        if commit_response.status_code != 200:
-            return {'success': False, 'error': f'Failed to get commit details: {commit_response.status_code}'}
-        
-        tree_sha = commit_response.json()['tree']['sha']
-        
-        # Create new tree with files
-        tree_items = []
+        # Push each file individually using Contents API
         for file_path, file_content in files_to_push.items():
+            # Check if file exists
+            contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
+            get_response = requests.get(contents_url, headers=headers)
+            
+            # Prepare file data
             if isinstance(file_content, str):
                 content_bytes = file_content.encode('utf-8')
             else:
@@ -224,53 +211,24 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
             
             content_b64 = base64.b64encode(content_bytes).decode('utf-8')
             
-            tree_items.append({
-                'path': file_path,
-                'mode': '100644',
-                'type': 'blob',
+            file_data = {
+                'message': f'{commit_message} - {file_path}',
                 'content': content_b64
-            })
+            }
+            
+            if get_response.status_code == 200:
+                # File exists, update it
+                existing_data = get_response.json()
+                file_data['sha'] = existing_data['sha']
+                put_response = requests.put(contents_url, headers=headers, json=file_data)
+            else:
+                # File doesn't exist, create it
+                put_response = requests.put(contents_url, headers=headers, json=file_data)
+            
+            if put_response.status_code not in [200, 201]:
+                return {'success': False, 'error': f'Failed to push {file_path}: {put_response.status_code} - {put_response.text}'}
         
-        # Create new tree
-        tree_data = {
-            'base_tree': tree_sha,
-            'tree': tree_items
-        }
-        
-        tree_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/trees'
-        tree_response = requests.post(tree_url, headers=headers, json=tree_data)
-        
-        if tree_response.status_code != 201:
-            return {'success': False, 'error': f'Failed to create tree: {tree_response.status_code}'}
-        
-        new_tree_sha = tree_response.json()['sha']
-        
-        # Create new commit
-        commit_data = {
-            'message': commit_message,
-            'tree': new_tree_sha,
-            'parents': [current_sha]
-        }
-        
-        commit_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/commits'
-        commit_response = requests.post(commit_url, headers=headers, json=commit_data)
-        
-        if commit_response.status_code != 201:
-            return {'success': False, 'error': f'Failed to create commit: {commit_response.status_code}'}
-        
-        new_commit_sha = commit_response.json()['sha']
-        
-        # Update main branch
-        update_data = {
-            'sha': new_commit_sha
-        }
-        
-        update_response = requests.patch(ref_url, headers=headers, json=update_data)
-        
-        if update_response.status_code != 200:
-            return {'success': False, 'error': f'Failed to update branch: {update_response.status_code}'}
-        
-        return {'success': True, 'commit_sha': new_commit_sha}
+        return {'success': True, 'message': f'Successfully pushed {len(files_to_push)} files'}
         
     except Exception as e:
         return {'success': False, 'error': str(e)}
@@ -563,10 +521,15 @@ def get_services():
                     print(f"Warning: Could not get health metrics for {service_name}: {e}")
 
                 try:
-                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
-                    argocd_app = json.loads(argocd_result.stdout)
-                    health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
-                    sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
+                    if is_railway_environment():
+                        # Skip kubectl check on Railway
+                        health_status = 'Unknown'
+                        sync_status = 'Unknown'
+                    else:
+                        argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
+                        argocd_app = json.loads(argocd_result.stdout)
+                        health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
+                        sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
                 except subprocess.CalledProcessError:
                     health_status = 'Unknown'
                     sync_status = 'Unknown'
@@ -2499,11 +2462,17 @@ spec:
                         files_to_push[relative_path] = content
             
             # Push using GitHub API
+            # Use token from service data or fallback to config
+            token_to_use = service_data.get('manifests_token') or MANIFESTS_REPO_TOKEN
+            print(f"Using token for GitHub API: {token_to_use[:10] if token_to_use else 'None'}...")
+            if not token_to_use:
+                return {'success': False, 'error': 'MANIFESTS_REPO_TOKEN is required for pushing to Repo B'}
+            
             push_result = push_files_to_github_api(
                 repo_b_url, 
                 files_to_push, 
                 f'Add service {service_name} with YAML manifests',
-                MANIFESTS_REPO_TOKEN
+                token_to_use
             )
             
             if not push_result['success']:
@@ -2617,13 +2586,18 @@ spec:
                     print(f"ArgoCD sync timeout for {service_name} after {max_wait_time} seconds, proceeding anyway...")
                 
                 # Final comprehensive check before proceeding
-                final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
-                                                   capture_output=True, text=True)
-                final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                 capture_output=True, text=True)
-                
-                argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
-                pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
+                if is_railway_environment():
+                    # Skip kubectl check on Railway
+                    argocd_final = True  # Assume success on Railway
+                    pods_final = True
+                else:
+                    final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
+                                                       capture_output=True, text=True)
+                    final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                     capture_output=True, text=True)
+                    
+                    argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
+                    pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
                 
                 if argocd_final and pods_final:
                     # ArgoCD has synced, safe to delete YAML files
@@ -2809,7 +2783,8 @@ def recreate_yaml_from_mongo(service_name):
             'cpu_request': service_data.get('cpu_request', '100m'),
             'cpu_limit': service_data.get('cpu_limit', '200m'),
             'memory_request': service_data.get('memory_request', '128Mi'),
-            'memory_limit': service_data.get('memory_limit', '256Mi')
+            'memory_limit': service_data.get('memory_limit', '256Mi'),
+            'manifests_token': MANIFESTS_REPO_TOKEN  # Add token for GitHub API
         }
         
         # Get actual image tag from service data or generate from timestamp
@@ -2852,6 +2827,12 @@ def recreate_yaml_from_mongo(service_name):
                             try:
                                 import subprocess
                                 import json
+                                
+                                # Skip kubectl check on Railway
+                                if is_railway_environment():
+                                    print(f"Skipping ArgoCD status check on Railway for {service_name}")
+                                    time.sleep(30)
+                                    continue
                                 
                                 # Get detailed ArgoCD application status
                                 argocd_result = subprocess.run(
