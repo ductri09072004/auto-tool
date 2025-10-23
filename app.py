@@ -403,7 +403,10 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
         }
 
         # Fetch public key
+        print(f"Fetching public key from: {base}/public-key")
+        print(f"Using token: {token_to_use[:10]}..." if token_to_use else "No token")
         pk_resp = requests.get(f"{base}/public-key", headers=headers)
+        print(f"Public key response: {pk_resp.status_code}")
         if pk_resp.status_code != 200:
             print(f"WARNING: Cannot access repo secrets: {pk_resp.status_code} {pk_resp.text}")
             print(f"INFO: This might be because Actions is not enabled or no permission")
@@ -432,7 +435,9 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             'MANIFESTS_REPO_TOKEN': manifests_token,
             'ARGOCD_WEBHOOK_URL': ARGOCD_WEBHOOK_URL
         }
+        print(f"Setting secrets: {list(updates.keys())}")
         for name, value in updates.items():
+            print(f"Checking {name}: {'SET' if value else 'EMPTY'}")
             if not value:
                 print(f"WARNING: {name} is empty, skipping...")
                 continue
@@ -457,11 +462,12 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
                 if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
                     print(f"CRITICAL: Failed to set {name} - GitHub Actions will fail!")
                     return False
+        print("✅ All secrets set successfully")
         return True
     except Exception as e:
-        print(f"WARNING: ensure_repo_secrets error: {e}")
-        print(f"INFO: Continuing without setting secrets...")
-        return True  # Continue deployment even if secrets fail
+        print(f"ERROR: ensure_repo_secrets error: {e}")
+        print(f"INFO: This will cause GitHub Actions to fail!")
+        return False  # Return False to indicate failure
 
 def add_prometheus_scrape_job(service_name, service_port):
     """Add Prometheus scrape job for new service"""
@@ -1230,7 +1236,11 @@ def create_service():
         # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL)
         try:
             print("Setting repository secrets before completing service creation...")
+            print(f"Repository URL: {repo_url}")
+            print(f"GitHub token: {'SET' if github_token else 'NOT SET'}")
+            print(f"Manifests token: {'SET' if manifests_token else 'NOT SET'}")
             secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
+            print(f"Secrets result: {secrets_result}")
             if not secrets_result:
                 return jsonify({
                     'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
