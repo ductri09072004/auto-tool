@@ -2430,43 +2430,42 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         use_local_templates = os.path.exists(k8s_template_dir)
         if not use_local_templates:
             print("Using inline templates for Railway deployment")
+        
+        for yaml_file in yaml_files:
+            dst_file = os.path.join(k8s_dir, yaml_file)
             
-            for yaml_file in yaml_files:
-                dst_file = os.path.join(k8s_dir, yaml_file)
-                
-                if use_local_templates:
-                    # Use local template files
-                    src_file = os.path.join(k8s_template_dir, yaml_file)
-                    if os.path.exists(src_file):
-                        # Read template content
-                        with open(src_file, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                    else:
-                        continue
+            if use_local_templates:
+                # Use local template files
+                src_file = os.path.join(k8s_template_dir, yaml_file)
+                if os.path.exists(src_file):
+                    # Read template content
+                    with open(src_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
                 else:
-                    # Create inline template content for Railway
-                    content = _create_inline_template(yaml_file, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_a_name, image_tag)
-                    
-                # Replace placeholders (for both local and inline templates)
-                content = content.replace('{SERVICE_NAME}', service_name)
-                content = content.replace('{NAMESPACE}', namespace)
-                content = content.replace('{PORT}', str(port))
-                content = content.replace('{REPLICAS}', str(replicas))
-                content = content.replace('{MIN_REPLICAS}', str(min_replicas))
-                content = content.replace('{MAX_REPLICAS}', str(max_replicas))
-                content = content.replace('{CPU_REQUEST}', cpu_request)
-                content = content.replace('{CPU_LIMIT}', cpu_limit)
-                content = content.replace('{MEMORY_REQUEST}', memory_request)
-                content = content.replace('{MEMORY_LIMIT}', memory_limit)
-                content = content.replace('{REPO_URL}', repo_url)
-                content = content.replace('{IMAGE_TAG}', image_tag)
-                
-                # Write customized content
-                with open(dst_file, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                
-                print(f"DEBUG: Created {yaml_file} at {dst_file}")
+                    continue
+            else:
+                # Create inline template content for Railway
+                content = _create_inline_template(yaml_file, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_a_name, image_tag)
             
+            # Replace placeholders (for both local and inline templates)
+            content = content.replace('{SERVICE_NAME}', service_name)
+            content = content.replace('{NAMESPACE}', namespace)
+            content = content.replace('{PORT}', str(port))
+            content = content.replace('{REPLICAS}', str(replicas))
+            content = content.replace('{MIN_REPLICAS}', str(min_replicas))
+            content = content.replace('{MAX_REPLICAS}', str(max_replicas))
+            content = content.replace('{CPU_REQUEST}', cpu_request)
+            content = content.replace('{CPU_LIMIT}', cpu_limit)
+            content = content.replace('{MEMORY_REQUEST}', memory_request)
+            content = content.replace('{MEMORY_LIMIT}', memory_limit)
+            content = content.replace('{REPO_URL}', repo_url)
+            content = content.replace('{IMAGE_TAG}', image_tag)
+            
+            # Write customized content
+            with open(dst_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            print(f"DEBUG: Created {yaml_file} at {dst_file}")
             print(f"Created {yaml_file} for {service_name}")
         
         # Auto-configure Prometheus
