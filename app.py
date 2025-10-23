@@ -475,21 +475,21 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
                 print(f"WARNING: {name} is empty, skipping...")
                 continue
             try:
-            encrypted_value = _encrypt_secret(repo_public_key, value)
-            put_resp = requests.put(
-                f"{base}/{name}",
-                headers={**headers, 'Content-Type': 'application/json'},
-                json={'encrypted_value': encrypted_value, 'key_id': key_id}
-            )
-            if put_resp.status_code not in [201, 204]:
+                encrypted_value = _encrypt_secret(repo_public_key, value)
+                put_resp = requests.put(
+                    f"{base}/{name}",
+                    headers={**headers, 'Content-Type': 'application/json'},
+                    json={'encrypted_value': encrypted_value, 'key_id': key_id}
+                )
+                if put_resp.status_code not in [201, 204]:
                     print(f"ERROR: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
                     print(f"INFO: This will cause GitHub Actions to fail!")
                     # For critical secrets, this is critical
                     if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
                         print(f"CRITICAL: {name} is required for GitHub Actions to work!")
                         return False
-            else:
-                print(f"SUCCESS: Successfully set secret {name}")
+                else:
+                    print(f"SUCCESS: Successfully set secret {name}")
             except Exception as e:
                 print(f"ERROR: Exception while setting secret {name}: {e}")
                 if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
@@ -636,10 +636,10 @@ def get_services():
                         health_status = 'Unknown'
                         sync_status = 'Unknown'
                     else:
-                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
-                    argocd_app = json.loads(argocd_result.stdout)
-                    health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
-                    sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
+                        argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
+                        argocd_app = json.loads(argocd_result.stdout)
+                        health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
+                        sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
                 except subprocess.CalledProcessError:
                     health_status = 'Unknown'
                     sync_status = 'Unknown'
@@ -2383,13 +2383,13 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Check if we can use git commands or need to use GitHub API
         if has_git_command() and not is_railway_environment():
             # Use git commands for local development
-        clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
-        if clone_proc.returncode != 0:
-            return {'success': False, 'error': f'Clone Repo B failed: {clone_proc.stderr}'}
+            clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
+            if clone_proc.returncode != 0:
+                return {'success': False, 'error': f'Clone Repo B failed: {clone_proc.stderr}'}
 
-        # Ensure we are on latest main
-        subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
-        subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
+            # Ensure we are on latest main
+            subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
+            subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
         else:
             # Use GitHub API for Railway deployment
             print("Using GitHub API instead of git commands (Railway environment)")
@@ -2400,7 +2400,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Create services/{SERVICE_NAME}/k8s structure with YAML files
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-        service_dir = os.path.join(clone_dir, 'services', service_name)
+            service_dir = os.path.join(clone_dir, 'services', service_name)
         else:
             # Railway deployment - create temporary directory
             service_dir = os.path.join(tmpdir, 'services', service_name)
@@ -2413,16 +2413,16 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         k8s_template_dir = os.path.join(template_dir, 'k8s')
         
         # List of YAML files to create
-            yaml_files = [
-                'deployment.yaml',
-                'service.yaml', 
-                'configmap.yaml',
-                'hpa.yaml',
-                'ingress.yaml',
-                'ingress-gateway.yaml',
-                'namespace.yaml',
-                'secret.yaml'
-            ]
+        yaml_files = [
+            'deployment.yaml',
+            'service.yaml', 
+            'configmap.yaml',
+            'hpa.yaml',
+            'ingress.yaml',
+            'ingress-gateway.yaml',
+            'namespace.yaml',
+            'secret.yaml'
+        ]
         
         # Check if we have local templates or need to use inline templates
         use_local_templates = os.path.exists(k8s_template_dir)
@@ -2430,40 +2430,40 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             print("Using inline templates for Railway deployment")
             
             for yaml_file in yaml_files:
-                    dst_file = os.path.join(k8s_dir, yaml_file)
-                    
-            if use_local_templates:
-                # Use local template files
-                src_file = os.path.join(k8s_template_dir, yaml_file)
-                if os.path.exists(src_file):
-                    # Read template content
-                    with open(src_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
+                dst_file = os.path.join(k8s_dir, yaml_file)
+                
+                if use_local_templates:
+                    # Use local template files
+                    src_file = os.path.join(k8s_template_dir, yaml_file)
+                    if os.path.exists(src_file):
+                        # Read template content
+                        with open(src_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                    else:
+                        continue
                 else:
-                    continue
-            else:
-                # Create inline template content for Railway
-                content = _create_inline_template(yaml_file, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_a_name, image_tag)
+                    # Create inline template content for Railway
+                    content = _create_inline_template(yaml_file, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_a_name, image_tag)
                     
-            # Replace placeholders (for both local and inline templates)
-                    content = content.replace('{SERVICE_NAME}', service_name)
-                    content = content.replace('{NAMESPACE}', namespace)
-                    content = content.replace('{PORT}', str(port))
-                    content = content.replace('{REPLICAS}', str(replicas))
-                    content = content.replace('{MIN_REPLICAS}', str(min_replicas))
-                    content = content.replace('{MAX_REPLICAS}', str(max_replicas))
-                    content = content.replace('{CPU_REQUEST}', cpu_request)
-                    content = content.replace('{CPU_LIMIT}', cpu_limit)
-                    content = content.replace('{MEMORY_REQUEST}', memory_request)
-                    content = content.replace('{MEMORY_LIMIT}', memory_limit)
-                    content = content.replace('{REPO_URL}', repo_url)
-                    content = content.replace('{IMAGE_TAG}', image_tag)
-                    
-                    # Write customized content
-                    with open(dst_file, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    
-                    print(f"Created {yaml_file} for {service_name}")
+                # Replace placeholders (for both local and inline templates)
+                content = content.replace('{SERVICE_NAME}', service_name)
+                content = content.replace('{NAMESPACE}', namespace)
+                content = content.replace('{PORT}', str(port))
+                content = content.replace('{REPLICAS}', str(replicas))
+                content = content.replace('{MIN_REPLICAS}', str(min_replicas))
+                content = content.replace('{MAX_REPLICAS}', str(max_replicas))
+                content = content.replace('{CPU_REQUEST}', cpu_request)
+                content = content.replace('{CPU_LIMIT}', cpu_limit)
+                content = content.replace('{MEMORY_REQUEST}', memory_request)
+                content = content.replace('{MEMORY_LIMIT}', memory_limit)
+                content = content.replace('{REPO_URL}', repo_url)
+                content = content.replace('{IMAGE_TAG}', image_tag)
+                
+                # Write customized content
+                with open(dst_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+            
+            print(f"Created {yaml_file} for {service_name}")
         
         # Auto-configure Prometheus
         try:
@@ -2484,7 +2484,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Create ArgoCD Application pointing to services/{SERVICE_NAME}/k8s
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-        apps_dir = os.path.join(clone_dir, 'apps')
+            apps_dir = os.path.join(clone_dir, 'apps')
         else:
             # Railway deployment - use temporary directory
             apps_dir = os.path.join(tmpdir, 'apps')
@@ -2534,15 +2534,15 @@ spec:
         # Commit and push all changes to Repo B
         if has_git_command() and not is_railway_environment():
             # Use git commands for local development
-        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-        if st.stdout.strip():
-            subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
-        push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
-        if push_proc.returncode != 0:
-            return {'success': False, 'error': push_proc.stderr}
+            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+            if st.stdout.strip():
+                subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
+            push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
+            if push_proc.returncode != 0:
+                return {'success': False, 'error': push_proc.stderr}
         else:
             # Use GitHub API for Railway deployment
             print("Pushing files using GitHub API...")
@@ -2597,11 +2597,11 @@ spec:
         # Auto-deploy ArgoCD Application after successful push
         if has_git_command() and not is_railway_environment():
             # Use kubectl for local development
-        try:
-            subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
-            print(f"ArgoCD Application '{service_name}' deployed successfully")
-        except subprocess.CalledProcessError as e:
-            print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
+            try:
+                subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
+                print(f"ArgoCD Application '{service_name}' deployed successfully")
+            except subprocess.CalledProcessError as e:
+                print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
         else:
             # On Railway, ArgoCD Application will be deployed manually or via other means
             print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
@@ -2676,9 +2676,9 @@ spec:
                                         print(f"ArgoCD synced with new changes (Railway), deleting YAML files for {service_name}...")
                                         break
                                     else:
-                                    pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                               capture_output=True, text=True)
-                                    pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
+                                        pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                                   capture_output=True, text=True)
+                                        pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
                                     
                                     if pods_running:
                                         print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
@@ -2710,13 +2710,13 @@ spec:
                     argocd_final = True  # Assume success on Railway
                     pods_final = True
                 else:
-                final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
-                                                   capture_output=True, text=True)
-                final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                 capture_output=True, text=True)
-                
-                argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
-                pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
+                    final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
+                                                       capture_output=True, text=True)
+                    final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                     capture_output=True, text=True)
+                    
+                    argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
+                    pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
                 
                 if argocd_final and pods_final:
                     # ArgoCD has synced, safe to delete YAML files
@@ -2743,8 +2743,8 @@ spec:
                             _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete)
                         else:
                             # Use git commands for local development
-                        temp_dir = tempfile.gettempdir()
-                        clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
+                            temp_dir = tempfile.gettempdir()
+                            clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
                         
                         # Remove existing directory if it exists
                         if os.path.exists(clone_dir):
