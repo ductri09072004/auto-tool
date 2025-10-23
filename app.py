@@ -407,8 +407,11 @@ DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri0
 
 def _encrypt_secret(public_key: str, secret_value: str) -> str:
     """Encrypt a secret using GitHub Actions public key (libsodium sealed box)."""
-    if public is None:
+    try:
+        from nacl import encoding, public
+    except ImportError:
         raise RuntimeError("PyNaCl is required to encrypt GitHub secrets. Please install pynacl.")
+    
     pk = public.PublicKey(public_key.encode("utf-8"), encoding.Base64Encoder())
     sealed_box = public.SealedBox(pk)
     encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
@@ -472,21 +475,21 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
                 print(f"WARNING: {name} is empty, skipping...")
                 continue
             try:
-                encrypted_value = _encrypt_secret(repo_public_key, value)
-                put_resp = requests.put(
-                    f"{base}/{name}",
-                    headers={**headers, 'Content-Type': 'application/json'},
-                    json={'encrypted_value': encrypted_value, 'key_id': key_id}
-                )
-                if put_resp.status_code not in [201, 204]:
+            encrypted_value = _encrypt_secret(repo_public_key, value)
+            put_resp = requests.put(
+                f"{base}/{name}",
+                headers={**headers, 'Content-Type': 'application/json'},
+                json={'encrypted_value': encrypted_value, 'key_id': key_id}
+            )
+            if put_resp.status_code not in [201, 204]:
                     print(f"ERROR: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
                     print(f"INFO: This will cause GitHub Actions to fail!")
                     # For critical secrets, this is critical
                     if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
                         print(f"CRITICAL: {name} is required for GitHub Actions to work!")
                         return False
-                else:
-                    print(f"SUCCESS: Successfully set secret {name}")
+            else:
+                print(f"SUCCESS: Successfully set secret {name}")
             except Exception as e:
                 print(f"ERROR: Exception while setting secret {name}: {e}")
                 if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
@@ -633,10 +636,10 @@ def get_services():
                         health_status = 'Unknown'
                         sync_status = 'Unknown'
                     else:
-                        argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
-                        argocd_app = json.loads(argocd_result.stdout)
-                        health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
-                        sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
+                    argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
+                    argocd_app = json.loads(argocd_result.stdout)
+                    health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
+                    sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
                 except subprocess.CalledProcessError:
                     health_status = 'Unknown'
                     sync_status = 'Unknown'
@@ -2380,13 +2383,13 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Check if we can use git commands or need to use GitHub API
         if has_git_command() and not is_railway_environment():
             # Use git commands for local development
-            clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
-            if clone_proc.returncode != 0:
-                return {'success': False, 'error': f'Clone Repo B failed: {clone_proc.stderr}'}
+        clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
+        if clone_proc.returncode != 0:
+            return {'success': False, 'error': f'Clone Repo B failed: {clone_proc.stderr}'}
 
-            # Ensure we are on latest main
-            subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
-            subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
+        # Ensure we are on latest main
+        subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
+        subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
         else:
             # Use GitHub API for Railway deployment
             print("Using GitHub API instead of git commands (Railway environment)")
@@ -2397,7 +2400,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Create services/{SERVICE_NAME}/k8s structure with YAML files
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-            service_dir = os.path.join(clone_dir, 'services', service_name)
+        service_dir = os.path.join(clone_dir, 'services', service_name)
         else:
             # Railway deployment - create temporary directory
             service_dir = os.path.join(tmpdir, 'services', service_name)
@@ -2410,25 +2413,25 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         k8s_template_dir = os.path.join(template_dir, 'k8s')
         
         # List of YAML files to create
-        yaml_files = [
-            'deployment.yaml',
-            'service.yaml', 
-            'configmap.yaml',
-            'hpa.yaml',
-            'ingress.yaml',
-            'ingress-gateway.yaml',
-            'namespace.yaml',
-            'secret.yaml'
-        ]
+            yaml_files = [
+                'deployment.yaml',
+                'service.yaml', 
+                'configmap.yaml',
+                'hpa.yaml',
+                'ingress.yaml',
+                'ingress-gateway.yaml',
+                'namespace.yaml',
+                'secret.yaml'
+            ]
         
         # Check if we have local templates or need to use inline templates
         use_local_templates = os.path.exists(k8s_template_dir)
         if not use_local_templates:
             print("Using inline templates for Railway deployment")
             
-        for yaml_file in yaml_files:
-            dst_file = os.path.join(k8s_dir, yaml_file)
-            
+            for yaml_file in yaml_files:
+                    dst_file = os.path.join(k8s_dir, yaml_file)
+                    
             if use_local_templates:
                 # Use local template files
                 src_file = os.path.join(k8s_template_dir, yaml_file)
@@ -2441,26 +2444,26 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             else:
                 # Create inline template content for Railway
                 content = _create_inline_template(yaml_file, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_a_name, image_tag)
-            
+                    
             # Replace placeholders (for both local and inline templates)
-            content = content.replace('{SERVICE_NAME}', service_name)
-            content = content.replace('{NAMESPACE}', namespace)
-            content = content.replace('{PORT}', str(port))
-            content = content.replace('{REPLICAS}', str(replicas))
-            content = content.replace('{MIN_REPLICAS}', str(min_replicas))
-            content = content.replace('{MAX_REPLICAS}', str(max_replicas))
-            content = content.replace('{CPU_REQUEST}', cpu_request)
-            content = content.replace('{CPU_LIMIT}', cpu_limit)
-            content = content.replace('{MEMORY_REQUEST}', memory_request)
-            content = content.replace('{MEMORY_LIMIT}', memory_limit)
-            content = content.replace('{REPO_URL}', repo_url)
-            content = content.replace('{IMAGE_TAG}', image_tag)
-            
-            # Write customized content
-            with open(dst_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            print(f"Created {yaml_file} for {service_name}")
+                    content = content.replace('{SERVICE_NAME}', service_name)
+                    content = content.replace('{NAMESPACE}', namespace)
+                    content = content.replace('{PORT}', str(port))
+                    content = content.replace('{REPLICAS}', str(replicas))
+                    content = content.replace('{MIN_REPLICAS}', str(min_replicas))
+                    content = content.replace('{MAX_REPLICAS}', str(max_replicas))
+                    content = content.replace('{CPU_REQUEST}', cpu_request)
+                    content = content.replace('{CPU_LIMIT}', cpu_limit)
+                    content = content.replace('{MEMORY_REQUEST}', memory_request)
+                    content = content.replace('{MEMORY_LIMIT}', memory_limit)
+                    content = content.replace('{REPO_URL}', repo_url)
+                    content = content.replace('{IMAGE_TAG}', image_tag)
+                    
+                    # Write customized content
+                    with open(dst_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    print(f"Created {yaml_file} for {service_name}")
         
         # Auto-configure Prometheus
         try:
@@ -2481,7 +2484,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         # Create ArgoCD Application pointing to services/{SERVICE_NAME}/k8s
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-            apps_dir = os.path.join(clone_dir, 'apps')
+        apps_dir = os.path.join(clone_dir, 'apps')
         else:
             # Railway deployment - use temporary directory
             apps_dir = os.path.join(tmpdir, 'apps')
@@ -2531,15 +2534,15 @@ spec:
         # Commit and push all changes to Repo B
         if has_git_command() and not is_railway_environment():
             # Use git commands for local development
-            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-            if st.stdout.strip():
-                subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
-            push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
-            if push_proc.returncode != 0:
-                return {'success': False, 'error': push_proc.stderr}
+        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+        if st.stdout.strip():
+            subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
+        push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
+        if push_proc.returncode != 0:
+            return {'success': False, 'error': push_proc.stderr}
         else:
             # Use GitHub API for Railway deployment
             print("Pushing files using GitHub API...")
@@ -2594,11 +2597,11 @@ spec:
         # Auto-deploy ArgoCD Application after successful push
         if has_git_command() and not is_railway_environment():
             # Use kubectl for local development
-            try:
-                subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
-                print(f"ArgoCD Application '{service_name}' deployed successfully")
-            except subprocess.CalledProcessError as e:
-                print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
+        try:
+            subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
+            print(f"ArgoCD Application '{service_name}' deployed successfully")
+        except subprocess.CalledProcessError as e:
+            print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
         else:
             # On Railway, ArgoCD Application will be deployed manually or via other means
             print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
@@ -2673,15 +2676,15 @@ spec:
                                         print(f"ArgoCD synced with new changes (Railway), deleting YAML files for {service_name}...")
                                         break
                                     else:
-                                        pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                                   capture_output=True, text=True)
-                                        pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
-                                        
-                                        if pods_running:
-                                            print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
-                                            break
-                                        else:
-                                            print(f"ArgoCD synced but pods not running yet for {service_name}...")
+                                    pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                               capture_output=True, text=True)
+                                    pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
+                                    
+                                    if pods_running:
+                                        print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
+                                        break
+                                    else:
+                                        print(f"ArgoCD synced but pods not running yet for {service_name}...")
                             else:
                                 # If no sync change detected yet, continue waiting
                                 if not sync_changed:
@@ -2707,13 +2710,13 @@ spec:
                     argocd_final = True  # Assume success on Railway
                     pods_final = True
                 else:
-                    final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
-                                                       capture_output=True, text=True)
-                    final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                     capture_output=True, text=True)
-                    
-                    argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
-                    pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
+                final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
+                                                   capture_output=True, text=True)
+                final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                 capture_output=True, text=True)
+                
+                argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
+                pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
                 
                 if argocd_final and pods_final:
                     # ArgoCD has synced, safe to delete YAML files
@@ -2740,88 +2743,88 @@ spec:
                             _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete)
                         else:
                             # Use git commands for local development
-                            temp_dir = tempfile.gettempdir()
-                            clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
-                            
-                            # Remove existing directory if it exists
-                            if os.path.exists(clone_dir):
-                                shutil.rmtree(clone_dir)
-                            
-                            print(f"Cloning repository to: {clone_dir}")
-                            clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                      capture_output=True, text=True, timeout=60)
-                            
-                            if clone_proc.returncode != 0:
-                                print(f"Failed to clone repository: {clone_proc.stderr}")
-                                return
+                        temp_dir = tempfile.gettempdir()
+                        clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
                         
-                            # Check if service directory exists
-                            service_path = f"services/{service_name}/k8s"
-                            full_service_path = os.path.join(clone_dir, service_path)
-                            
-                            if not os.path.exists(full_service_path):
-                                print(f"Service directory not found: {service_path}")
-                                return
-                            
-                            # Delete each YAML file
-                            deleted_files = []
-                            for yaml_file in yaml_files_to_delete:
-                                file_path = os.path.join(full_service_path, yaml_file)
-                                if os.path.exists(file_path):
-                                    os.remove(file_path)
-                                    deleted_files.append(yaml_file)
-                                    print(f"Deleted {yaml_file}")
-                            
-                            # Also delete the ArgoCD Application file under apps/
-                            apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                            if os.path.exists(apps_file):
-                                os.remove(apps_file)
-                                deleted_files.append(f'apps/{service_name}-application.yaml')
-                                print(f"Deleted apps/{service_name}-application.yaml")
-                        
-                            if not deleted_files:
-                                print("No YAML files found to delete")
-                                return
-                            
-                            # Remove empty directories
-                            remaining_files = os.listdir(full_service_path)
-                            if not remaining_files:
-                                os.rmdir(full_service_path)
-                                print(f"Deleted empty k8s directory")
-                            
-                            # Check if services directory is empty
-                            service_dir = os.path.join(clone_dir, 'services', service_name)
-                            if os.path.exists(service_dir) and not os.listdir(service_dir):
-                                os.rmdir(service_dir)
-                                print(f"Deleted empty service directory")
-                            
-                            # Commit and push deletion
-                            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-                            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-                            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-                            
-                            # Check if there are changes
-                            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-                            if st.stdout.strip():
-                                commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
-                                                           cwd=clone_dir, capture_output=True, text=True)
-                                
-                                if commit_proc.returncode == 0:
-                                    push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
-                                                            cwd=clone_dir, capture_output=True, text=True)
-                                    
-                                    if push_proc.returncode == 0:
-                                        print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
-                                    else:
-                                        print(f"❌ Failed to push changes: {push_proc.stderr}")
-                                else:
-                                    print(f"❌ Failed to commit changes: {commit_proc.stderr}")
-                            else:
-                                print("No changes to commit")
-                            
-                            # Cleanup temp directory
+                        # Remove existing directory if it exists
+                        if os.path.exists(clone_dir):
                             shutil.rmtree(clone_dir)
-                            print(f"Cleaned up temp directory")
+                        
+                        print(f"Cloning repository to: {clone_dir}")
+                        clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                  capture_output=True, text=True, timeout=60)
+                        
+                        if clone_proc.returncode != 0:
+                            print(f"Failed to clone repository: {clone_proc.stderr}")
+                            return
+                        
+                        # Check if service directory exists
+                        service_path = f"services/{service_name}/k8s"
+                        full_service_path = os.path.join(clone_dir, service_path)
+                        
+                        if not os.path.exists(full_service_path):
+                            print(f"Service directory not found: {service_path}")
+                            return
+                        
+                        # Delete each YAML file
+                        deleted_files = []
+                        for yaml_file in yaml_files_to_delete:
+                            file_path = os.path.join(full_service_path, yaml_file)
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                deleted_files.append(yaml_file)
+                                print(f"Deleted {yaml_file}")
+                        
+                        # Also delete the ArgoCD Application file under apps/
+                        apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                        if os.path.exists(apps_file):
+                            os.remove(apps_file)
+                            deleted_files.append(f'apps/{service_name}-application.yaml')
+                            print(f"Deleted apps/{service_name}-application.yaml")
+                        
+                        if not deleted_files:
+                            print("No YAML files found to delete")
+                            return
+                        
+                        # Remove empty directories
+                        remaining_files = os.listdir(full_service_path)
+                        if not remaining_files:
+                            os.rmdir(full_service_path)
+                            print(f"Deleted empty k8s directory")
+                        
+                        # Check if services directory is empty
+                        service_dir = os.path.join(clone_dir, 'services', service_name)
+                        if os.path.exists(service_dir) and not os.listdir(service_dir):
+                            os.rmdir(service_dir)
+                            print(f"Deleted empty service directory")
+                        
+                        # Commit and push deletion
+                        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+                        
+                        # Check if there are changes
+                        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+                        if st.stdout.strip():
+                            commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
+                                                       cwd=clone_dir, capture_output=True, text=True)
+                            
+                            if commit_proc.returncode == 0:
+                                push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
+                                                        cwd=clone_dir, capture_output=True, text=True)
+                                
+                                if push_proc.returncode == 0:
+                                    print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
+                                else:
+                                    print(f"❌ Failed to push changes: {push_proc.stderr}")
+                            else:
+                                print(f"❌ Failed to commit changes: {commit_proc.stderr}")
+                        else:
+                            print("No changes to commit")
+                        
+                        # Cleanup temp directory
+                        shutil.rmtree(clone_dir)
+                        print(f"Cleaned up temp directory")
                         
                     except Exception as cleanup_error:
                         print(f"❌ Error during YAML cleanup: {cleanup_error}")
