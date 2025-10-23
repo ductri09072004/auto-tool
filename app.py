@@ -181,6 +181,77 @@ data:
     else:
         return f"# Template for {template_name} not implemented"
 
+def _delete_yaml_files_via_github_api(service_name, repo_url, yaml_files_to_delete):
+    """Delete YAML files using GitHub API instead of git commands"""
+    try:
+        import re
+        
+        # Parse repository URL
+        match = re.search(r'github\.com/([^/]+)/([^/]+)', repo_url)
+        if not match:
+            print(f"Invalid GitHub repository URL: {repo_url}")
+            return False
+        
+        owner = match.group(1)
+        repo_name = match.group(2)
+        
+        headers = {'Authorization': f'token {MANIFESTS_REPO_TOKEN}', 'Accept': 'application/vnd.github+json'}
+        
+        deleted_count = 0
+        
+        # Delete each YAML file
+        for yaml_file in yaml_files_to_delete:
+            file_path = f"services/{service_name}/k8s/{yaml_file}"
+            
+            # Check if file exists
+            contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
+            get_response = requests.get(contents_url, headers=headers)
+            
+            if get_response.status_code == 200:
+                # File exists, delete it
+                existing_data = get_response.json()
+                delete_data = {
+                    'message': f'Delete {yaml_file} after ArgoCD sync for {service_name}',
+                    'sha': existing_data['sha']
+                }
+                
+                delete_response = requests.delete(contents_url, headers=headers, json=delete_data)
+                
+                if delete_response.status_code in [200, 204]:
+                    print(f"Deleted {yaml_file}")
+                    deleted_count += 1
+                else:
+                    print(f"Failed to delete {yaml_file}: {delete_response.status_code}")
+            else:
+                print(f"File {yaml_file} not found, skipping")
+        
+        # Also delete ArgoCD Application file
+        apps_file_path = f"apps/{service_name}-application.yaml"
+        apps_contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{apps_file_path}'
+        apps_get_response = requests.get(apps_contents_url, headers=headers)
+        
+        if apps_get_response.status_code == 200:
+            apps_existing_data = apps_get_response.json()
+            apps_delete_data = {
+                'message': f'Delete ArgoCD Application after sync for {service_name}',
+                'sha': apps_existing_data['sha']
+            }
+            
+            apps_delete_response = requests.delete(apps_contents_url, headers=headers, json=apps_delete_data)
+            
+            if apps_delete_response.status_code in [200, 204]:
+                print(f"Deleted apps/{service_name}-application.yaml")
+                deleted_count += 1
+            else:
+                print(f"Failed to delete ArgoCD Application: {apps_delete_response.status_code}")
+        
+        print(f"Successfully deleted {deleted_count} files for {service_name}")
+        return True
+        
+    except Exception as e:
+        print(f"Error deleting YAML files via GitHub API: {e}")
+        return False
+
 def push_files_to_github_api(repo_url, files_to_push, commit_message, github_token):
     """Push files to GitHub repository using GitHub Contents API instead of git commands"""
     try:
@@ -2557,15 +2628,20 @@ spec:
                                     break
                                 else:
                                     # For Healthy status, check if pods are running
-                                    pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                               capture_output=True, text=True)
-                                    pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
-                                    
-                                    if pods_running:
-                                        print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
+                                    if is_railway_environment():
+                                        # Skip pod check on Railway
+                                        print(f"ArgoCD synced with new changes (Railway), deleting YAML files for {service_name}...")
                                         break
                                     else:
-                                        print(f"ArgoCD synced but pods not running yet for {service_name}...")
+                                        pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
+                                                                   capture_output=True, text=True)
+                                        pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
+                                        
+                                        if pods_running:
+                                            print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
+                                            break
+                                        else:
+                                            print(f"ArgoCD synced but pods not running yet for {service_name}...")
                             else:
                                 # If no sync change detected yet, continue waiting
                                 if not sync_changed:
@@ -2617,89 +2693,95 @@ spec:
                             'argocd-application.yaml'
                         ]
                         
-                        # Clone repo again for deletion
-                        temp_dir = tempfile.gettempdir()
-                        clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
-                        
-                        # Remove existing directory if it exists
-                        if os.path.exists(clone_dir):
-                            shutil.rmtree(clone_dir)
-                        
-                        print(f"Cloning repository to: {clone_dir}")
-                        clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                  capture_output=True, text=True, timeout=60)
-                        
-                        if clone_proc.returncode != 0:
-                            print(f"Failed to clone repository: {clone_proc.stderr}")
-                            return
-                        
-                        # Check if service directory exists
-                        service_path = f"services/{service_name}/k8s"
-                        full_service_path = os.path.join(clone_dir, service_path)
-                        
-                        if not os.path.exists(full_service_path):
-                            print(f"Service directory not found: {service_path}")
-                            return
-                        
-                        # Delete each YAML file
-                        deleted_files = []
-                        for yaml_file in yaml_files_to_delete:
-                            file_path = os.path.join(full_service_path, yaml_file)
-                            if os.path.exists(file_path):
-                                os.remove(file_path)
-                                deleted_files.append(yaml_file)
-                                print(f"Deleted {yaml_file}")
-                        
-                        # Also delete the ArgoCD Application file under apps/
-                        apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                        if os.path.exists(apps_file):
-                            os.remove(apps_file)
-                            deleted_files.append(f'apps/{service_name}-application.yaml')
-                            print(f"Deleted apps/{service_name}-application.yaml")
-                        
-                        if not deleted_files:
-                            print("No YAML files found to delete")
-                            return
-                        
-                        # Remove empty directories
-                        remaining_files = os.listdir(full_service_path)
-                        if not remaining_files:
-                            os.rmdir(full_service_path)
-                            print(f"Deleted empty k8s directory")
-                        
-                        # Check if services directory is empty
-                        service_dir = os.path.join(clone_dir, 'services', service_name)
-                        if os.path.exists(service_dir) and not os.listdir(service_dir):
-                            os.rmdir(service_dir)
-                            print(f"Deleted empty service directory")
-                        
-                        # Commit and push deletion
-                        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-                        
-                        # Check if there are changes
-                        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-                        if st.stdout.strip():
-                            commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
-                                                       cwd=clone_dir, capture_output=True, text=True)
-                            
-                            if commit_proc.returncode == 0:
-                                push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
-                                                        cwd=clone_dir, capture_output=True, text=True)
-                                
-                                if push_proc.returncode == 0:
-                                    print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
-                                else:
-                                    print(f"❌ Failed to push changes: {push_proc.stderr}")
-                            else:
-                                print(f"❌ Failed to commit changes: {commit_proc.stderr}")
+                        # Delete YAML files using GitHub API instead of git clone
+                        if is_railway_environment():
+                            print(f"Using GitHub API to delete YAML files for {service_name}")
+                            # Use GitHub API to delete files
+                            _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete)
                         else:
-                            print("No changes to commit")
+                            # Use git commands for local development
+                            temp_dir = tempfile.gettempdir()
+                            clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
+                            
+                            # Remove existing directory if it exists
+                            if os.path.exists(clone_dir):
+                                shutil.rmtree(clone_dir)
+                            
+                            print(f"Cloning repository to: {clone_dir}")
+                            clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                      capture_output=True, text=True, timeout=60)
+                            
+                            if clone_proc.returncode != 0:
+                                print(f"Failed to clone repository: {clone_proc.stderr}")
+                                return
                         
-                        # Cleanup temp directory
-                        shutil.rmtree(clone_dir)
-                        print(f"Cleaned up temp directory")
+                            # Check if service directory exists
+                            service_path = f"services/{service_name}/k8s"
+                            full_service_path = os.path.join(clone_dir, service_path)
+                            
+                            if not os.path.exists(full_service_path):
+                                print(f"Service directory not found: {service_path}")
+                                return
+                            
+                            # Delete each YAML file
+                            deleted_files = []
+                            for yaml_file in yaml_files_to_delete:
+                                file_path = os.path.join(full_service_path, yaml_file)
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                                    deleted_files.append(yaml_file)
+                                    print(f"Deleted {yaml_file}")
+                            
+                            # Also delete the ArgoCD Application file under apps/
+                            apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                            if os.path.exists(apps_file):
+                                os.remove(apps_file)
+                                deleted_files.append(f'apps/{service_name}-application.yaml')
+                                print(f"Deleted apps/{service_name}-application.yaml")
+                        
+                            if not deleted_files:
+                                print("No YAML files found to delete")
+                                return
+                            
+                            # Remove empty directories
+                            remaining_files = os.listdir(full_service_path)
+                            if not remaining_files:
+                                os.rmdir(full_service_path)
+                                print(f"Deleted empty k8s directory")
+                            
+                            # Check if services directory is empty
+                            service_dir = os.path.join(clone_dir, 'services', service_name)
+                            if os.path.exists(service_dir) and not os.listdir(service_dir):
+                                os.rmdir(service_dir)
+                                print(f"Deleted empty service directory")
+                            
+                            # Commit and push deletion
+                            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+                            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+                            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+                            
+                            # Check if there are changes
+                            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+                            if st.stdout.strip():
+                                commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
+                                                           cwd=clone_dir, capture_output=True, text=True)
+                                
+                                if commit_proc.returncode == 0:
+                                    push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
+                                                            cwd=clone_dir, capture_output=True, text=True)
+                                    
+                                    if push_proc.returncode == 0:
+                                        print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
+                                    else:
+                                        print(f"❌ Failed to push changes: {push_proc.stderr}")
+                                else:
+                                    print(f"❌ Failed to commit changes: {commit_proc.stderr}")
+                            else:
+                                print("No changes to commit")
+                            
+                            # Cleanup temp directory
+                            shutil.rmtree(clone_dir)
+                            print(f"Cleaned up temp directory")
                         
                     except Exception as cleanup_error:
                         print(f"❌ Error during YAML cleanup: {cleanup_error}")
@@ -2807,150 +2889,6 @@ def recreate_yaml_from_mongo(service_name):
         if result['success']:
             # Schedule deletion of YAML files after ArgoCD sync (in background)
             import threading
-            
-            def delete_yaml_files_after_sync(service_name, repo_b_url):
-                """Delete YAML files after ArgoCD has synced with new changes"""
-                try:
-                    import time
-                    start_time = time.time()
-                    print(f"Starting background thread to monitor ArgoCD sync for {service_name}")
-                    
-                    # Track sync states to detect actual changes
-                    last_sync_status = None
-                    last_health_status = None
-                    last_revision = None
-                    sync_changed = False
-                    
-                    while time.time() - start_time < 300:  # Wait up to 5 minutes
-                        try:
-                            # Check ArgoCD application status in detail
-                            try:
-                                import subprocess
-                                import json
-                                
-                                # Skip kubectl check on Railway
-                                if is_railway_environment():
-                                    print(f"Skipping ArgoCD status check on Railway for {service_name}")
-                                    time.sleep(30)
-                                    continue
-                                
-                                # Get detailed ArgoCD application status
-                                argocd_result = subprocess.run(
-                                    ['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'],
-                                    capture_output=True, text=True, timeout=10
-                                )
-                                
-                                if argocd_result.returncode == 0:
-                                    app_data = json.loads(argocd_result.stdout)
-                                    status = app_data.get('status', {})
-                                    
-                                    sync_status = status.get('sync', {}).get('status', 'Unknown')
-                                    health_status = status.get('health', {}).get('status', 'Unknown')
-                                    revision = status.get('sync', {}).get('revision', 'Unknown')
-                                    
-                                    # Check if sync status or revision has changed (indicating new sync)
-                                    if (last_sync_status and last_sync_status != sync_status) or \
-                                       (last_revision and last_revision != revision):
-                                        sync_changed = True
-                                        print(f"ArgoCD sync state changed: {last_sync_status} -> {sync_status}, revision: {last_revision} -> {revision}")
-                                    
-                                    last_sync_status = sync_status
-                                    last_health_status = health_status
-                                    last_revision = revision
-                                    
-                                    print(f"ArgoCD status for {service_name}: sync={sync_status}, health={health_status}, revision={revision}")
-                                    
-                                    # Only proceed if we've seen a sync change AND current status is Synced AND health is Healthy
-                                    if sync_changed and sync_status == 'Synced' and health_status == 'Healthy':
-                                        print(f"ArgoCD synced with new changes and health is Healthy, deleting YAML files for {service_name}...")
-                                        proceed_to_deletion = True
-                                    else:
-                                        if health_status != 'Healthy':
-                                            print(f"ArgoCD health status is '{health_status}', waiting for Healthy status before deleting YAML files for {service_name}...")
-                                        proceed_to_deletion = False
-                                    
-                                    # Proceed with deletion if conditions are met
-                                    if proceed_to_deletion:
-                                            # Delete YAML files from Repo B
-                                            yaml_files_to_delete = [
-                                                'deployment.yaml',
-                                                'service.yaml', 
-                                                'configmap.yaml',
-                                                'hpa.yaml',
-                                                'ingress.yaml',
-                                                'ingress-gateway.yaml',
-                                                'secret.yaml',
-                                                'namespace.yaml',
-                                                'argocd-application.yaml'
-                                            ]
-                                            
-                                            # Clone repo and delete files
-                                            import tempfile
-                                            import shutil
-                                            tmpdir = tempfile.mkdtemp(prefix='delete_yaml_')
-                                            clone_dir = os.path.join(tmpdir, 'repo')
-                                            
-                                            # Remove existing directory if it exists
-                                            if os.path.exists(clone_dir):
-                                                shutil.rmtree(clone_dir)
-                                            
-                                            clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                                      capture_output=True, text=True)
-                                            if clone_proc.returncode == 0:
-                                                service_path = f"services/{service_name}/k8s"
-                                                for yaml_file in yaml_files_to_delete:
-                                                    file_path = os.path.join(clone_dir, service_path, yaml_file)
-                                                    if os.path.exists(file_path):
-                                                        os.remove(file_path)
-                                                        print(f"Deleted {yaml_file}")
-
-                                                # Also delete the ArgoCD Application file under apps/
-                                                apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                                                if os.path.exists(apps_file):
-                                                    os.remove(apps_file)
-                                                    print(f"Deleted apps/{service_name}-application.yaml")
-                                                    
-                                                    # Commit and push changes
-                                                    subprocess.run(['git', 'add', '.'], cwd=clone_dir)
-                                                    subprocess.run(['git', 'commit', '-m', f'Delete YAML files after ArgoCD sync for {service_name}'], 
-                                                                 cwd=clone_dir)
-                                                    subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir)
-                                                    
-                                                    print(f"YAML files deleted successfully for {service_name}")
-                                                
-                                                # Cleanup
-                                                shutil.rmtree(tmpdir)
-                                                return
-                                    
-                                    else:
-                                        # If no sync change detected yet, continue waiting
-                                        if not sync_changed:
-                                            print(f"Waiting for ArgoCD to detect changes for {service_name}...")
-                                        else:
-                                            if health_status == 'Progressing':
-                                                print(f"ArgoCD sync changed but ingress still loading: sync={sync_status}, health={health_status}")
-                                            else:
-                                                print(f"ArgoCD sync changed but not ready: sync={sync_status}, health={health_status}")
-                                
-                                else:
-                                    print(f"Failed to get ArgoCD application status: {argocd_result.stderr}")
-                                    
-                            except Exception as kubectl_error:
-                                print(f"Kubectl check failed: {kubectl_error}")
-                            
-                        except Exception as check_error:
-                            print(f"Error checking ArgoCD status: {check_error}")
-                        
-                        time.sleep(30)  # Wait 30 seconds before next check
-                    
-                    print(f"ArgoCD sync timeout for {service_name}, keeping YAML files")
-                    
-                except Exception as e:
-                    print(f"Error in delete_yaml_files_after_sync: {e}")
-            
-            # Start background thread to delete YAML files
-            delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
-            delete_thread.start()
             
             return {
                 'success': True,
