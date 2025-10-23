@@ -10,7 +10,7 @@ import os
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 GHCR_TOKEN = os.getenv('GHCR_TOKEN', '')
 MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
-ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://6faeaf22e11a.ngrok-free.app/api/webhook')
+ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://auto-tool.up.railway.app/api/webhook')
 
 # Debug logging for tokens
 print(f"MANIFESTS_REPO_TOKEN: {'SET' if MANIFESTS_REPO_TOKEN else 'NOT SET'}")
@@ -38,7 +38,7 @@ GITHUB_ORG = os.getenv('GITHUB_ORG', 'your_organization')
 DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri09072004/demo_fiss1_B')
 
 # Webhook Configuration
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://6faeaf22e11a.ngrok-free.app/api/github/webhook')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://auto-tool.up.railway.app/api/github/webhook')
 
 # Template Paths - Use relative paths for cross-platform compatibility
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

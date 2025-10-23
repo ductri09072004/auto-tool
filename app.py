@@ -3522,7 +3522,7 @@ def get_webhook_ready_services():
                 'current_image_tag': service.get('metadata', {}).get('image_tag', 'latest'),
                 'last_commit': service.get('metadata', {}).get('last_commit'),
                 'updated_at': service.get('updated_at'),
-                'webhook_url': f"http://localhost:8080/api/github/webhook"
+                'webhook_url': f"https://auto-tool.up.railway.app/api/github/webhook"
             })
         
         return jsonify({

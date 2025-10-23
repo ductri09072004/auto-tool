@@ -17,7 +17,7 @@ def setup_webhooks():
         print(f"Found {len(list(services))} services in database")
         services.rewind()  # Reset cursor
         
-        webhook_url = "http://localhost:3050/api/github/webhook"
+        webhook_url = "https://auto-tool.up.railway.app/api/github/webhook"
         
         print(f"\nWebhook URL: {webhook_url}")
         print("=" * 60)
