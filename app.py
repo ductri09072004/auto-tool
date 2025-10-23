@@ -12,7 +12,7 @@ import time
 import threading
 from service_manager import ServiceManager
 from api_db import register_db_api
-from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL, TEMPLATE_A_PATH, TEMPLATE_B_PATH, FALLBACK_TEMPLATE_B, REPO_B_SERVICES_PATH
 
 # Global variable to track port-forward process
 port_forward_process = None
@@ -557,12 +557,12 @@ def delete_service(service_name):
                 pass
         
         # 4) Delete service folder from local Repo B
-        repo_b_path = f"E:\\Study\\demo_fiss1_B\\services\\{service_name}"
+        repo_b_path = os.path.join(REPO_B_SERVICES_PATH, service_name)
         if os.path.exists(repo_b_path):
             shutil.rmtree(repo_b_path)
             # If local Repo B is a git repo, commit and push
             try:
-                repo_b_root = "E:\\Study\\demo_fiss1_B"
+                repo_b_root = os.path.dirname(REPO_B_SERVICES_PATH)
                 if os.path.isdir(os.path.join(repo_b_root, '.git')):
                     subprocess.run(['git','add','-A'], cwd=repo_b_root, check=False)
                     subprocess.run(['git','config','user.email','dev-portal@local'], cwd=repo_b_root, check=False)
@@ -655,7 +655,7 @@ def delete_service(service_name):
 def sync_services():
     """Sync services from Repo B folder structure to database"""
     try:
-        repo_b_path = "E:\\Study\\demo_fiss1_B\\services"
+        repo_b_path = REPO_B_SERVICES_PATH
         synced_count = 0
         
         if not os.path.exists(repo_b_path):
@@ -1525,7 +1525,7 @@ def generate_repository(service_data, repo_url, github_token=None):
         repo_dir = tempfile.mkdtemp(prefix=f'{service_name}_')
         
         # Copy template from local templates_src (cloned once for speed)
-        template_src = r"E:\\Study\\Auto_project_tool\\templates_src\\repo_a_template"
+        template_src = TEMPLATE_A_PATH
         if not os.path.isdir(template_src):
             return {'success': False, 'error': f'Template source not found: {template_src}'}
 
@@ -2055,7 +2055,7 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         template_b = os.path.join(base_dir, 'templates_src', 'repo_b_template', 'k8s')
         if not os.path.isdir(template_b):
-            fallback = r"E:\\Study\\demo_fiss1_B\k8s"
+            fallback = FALLBACK_TEMPLATE_B
             if os.path.isdir(fallback):
                 template_b = fallback
             else:
@@ -2457,7 +2457,7 @@ def recreate_yaml_from_mongo(service_name):
         # Get service data from MongoDB
         service_data = service_manager.get_service_data(service_name)
         if not service_data:
-            return jsonify({'error': f'Service {service_name} not found in MongoDB'}), 404
+            return {'success': False, 'error': f'Service {service_name} not found in MongoDB'}
         
         # Extract required data for generate_repo_b
         repo_a_url = service_data.get('repo_url', f'https://github.com/ductri09072004/{service_name}.git')
@@ -2637,7 +2637,7 @@ def recreate_yaml_from_mongo(service_name):
             delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
             delete_thread.start()
             
-            return jsonify({
+            return {
                 'success': True,
                 'message': f'YAML files recreated for {service_name} from MongoDB data',
                 'service_name': service_name,
@@ -2647,12 +2647,12 @@ def recreate_yaml_from_mongo(service_name):
                     'namespace': namespace,
                     'note': 'ArgoCD will automatically sync the new YAML files and they will be deleted after sync'
                 }
-            })
+            }
         else:
-            return jsonify({'error': result.get('error', 'Failed to recreate YAML files')}), 500
+            return {'success': False, 'error': result.get('error', 'Failed to recreate YAML files')}
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return {'success': False, 'error': str(e)}
 
 @app.route('/api/service/update-from-repo-a/<service_name>', methods=['POST'])
 def update_service_from_repo_a(service_name):
@@ -3183,11 +3183,10 @@ def github_webhook():
                             try:
                                 print(f"Materializing YAML files to Repo B for {repo_name}...")
                                 materialize_response = recreate_yaml_from_mongo(repo_name)
-                                if hasattr(materialize_response, 'get_json'):
-                                    mjson = materialize_response.get_json()
-                                    print(f"Materialize result: success={mjson.get('success')} error={mjson.get('error')}")
+                                if isinstance(materialize_response, dict):
+                                    print(f"Materialize result: success={materialize_response.get('success')} error={materialize_response.get('error')}")
                                 else:
-                                    print("Materialize response not JSON-compatible")
+                                    print("Materialize response not dictionary format")
                             except Exception as mat_err:
                                 print(f"Materialize YAML failed for {repo_name}: {mat_err}")
                         else:

@@ -35,13 +35,16 @@ DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri0
 # Webhook Configuration
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://6faeaf22e11a.ngrok-free.app/api/github/webhook')
 
-# Template Paths
-TEMPLATE_A_PATH = r"E:\Study\Auto_project_tool\templates_src\repo_a_template"
-TEMPLATE_B_PATH = r"E:\Study\Auto_project_tool\templates_src\repo_b_template\k8s"
-FALLBACK_TEMPLATE_B = r"E:\Study\demo_fiss1_B\k8s"
+# Template Paths - Use relative paths for cross-platform compatibility
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# For Railway deployment, use environment variables or fallback to local paths
+TEMPLATE_A_PATH = os.getenv('TEMPLATE_A_PATH', os.path.join(BASE_DIR, "templates_src", "repo_a_template"))
+TEMPLATE_B_PATH = os.getenv('TEMPLATE_B_PATH', os.path.join(BASE_DIR, "templates_src", "repo_b_template", "k8s"))
+FALLBACK_TEMPLATE_B = os.getenv('FALLBACK_TEMPLATE_B', os.path.join(BASE_DIR, "..", "demo_fiss1_B", "k8s"))
 
 # Repository B Paths
-REPO_B_SERVICES_PATH = "E:\\Study\\demo_fiss1_B\\services"
+REPO_B_SERVICES_PATH = os.getenv('REPO_B_SERVICES_PATH', os.path.join(BASE_DIR, "..", "demo_fiss1_B", "services"))
 
 # Token Validation
 def validate_tokens():
