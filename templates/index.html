@@ -161,6 +161,29 @@
                                 </div>
                             </div>
 
+                            <!-- Manifests Repository Token -->
+                            <div class="row mb-4">
+                                <div class="col-12">
+                                    <label for="manifests_token" class="form-label">
+                                        <i class="fas fa-key me-1"></i>
+                                        Manifests Repository Token *
+                                    </label>
+                                    <input type="password" class="form-control" id="manifests_token" name="manifests_token" 
+                                           placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" required>
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Required for pushing K8s manifests to Repository B. 
+                                        <a href="https://github.com/settings/tokens" target="_blank">Create token here</a>
+                                    </small>
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" id="show_manifests_token">
+                                        <label class="form-check-label" for="show_manifests_token">
+                                            Show manifests token
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Basic Information -->
                             <div class="row mb-4">
                                 <div class="col-md-4">
@@ -368,6 +391,12 @@
         // Toggle token visibility
         document.getElementById('show_token').addEventListener('change', function() {
             const tokenInput = document.getElementById('github_token');
+            tokenInput.type = this.checked ? 'text' : 'password';
+        });
+
+        // Toggle manifests token visibility
+        document.getElementById('show_manifests_token').addEventListener('change', function() {
+            const tokenInput = document.getElementById('manifests_token');
             tokenInput.type = this.checked ? 'text' : 'password';
         });
 

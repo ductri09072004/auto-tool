@@ -103,13 +103,29 @@ jobs:
       contents: write
     
     steps:
-    - name: Verify MANIFESTS_REPO_TOKEN exists
+    - name: Wait for secrets to be available
       run: |
-        if [ -z "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
-          echo "ERROR: MANIFESTS_REPO_TOKEN is required to push to Repo B."
-          echo "Please add it in Settings > Secrets and variables > Actions."
-          exit 1
-        fi
+        echo "Waiting for repository secrets to be set..."
+        sleep 10
+        echo "Checking for MANIFESTS_REPO_TOKEN..."
+        
+        # Retry mechanism for checking secrets
+        for i in {1..5}; do
+          if [ -n "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
+            echo "✅ MANIFESTS_REPO_TOKEN is available (attempt $i)"
+            break
+          else
+            echo "⏳ MANIFESTS_REPO_TOKEN not ready yet (attempt $i/5)"
+            if [ $i -eq 5 ]; then
+              echo "ERROR: MANIFESTS_REPO_TOKEN is required to push to Repo B."
+              echo "Please add it in Settings > Secrets and variables > Actions."
+              echo "This token should have been set automatically when the service was created."
+              echo "If this is a new service, please re-run the service creation process."
+              exit 1
+            fi
+            sleep 5
+          fi
+        done
 
     - name: Checkout manifests repo
       uses: actions/checkout@v4
@@ -139,10 +155,32 @@ jobs:
         git commit -m "Update $SERVICE image to ${{ github.sha }}" || exit 0
         git push
         
-    - name: ArgoCD Auto-Sync
+    - name: Trigger ArgoCD Webhook for Immediate Sync
       run: |
-        echo "ArgoCD will automatically sync when Repo B is updated..."
-        echo "No manual trigger needed - ArgoCD auto-sync is enabled!"
+        SERVICE="${{ github.event.repository.name }}"
+        echo "Triggering ArgoCD webhook for immediate sync of $SERVICE..."
+        
+        # Gửi webhook đến ArgoCD để trigger sync ngay lập tức
+        if [ -n "${{ secrets.ARGOCD_WEBHOOK_URL }}" ]; then
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-ArgoCD-Webhook-Token: ${{ secrets.ARGOCD_WEBHOOK_TOKEN }}" \
+            "${{ secrets.ARGOCD_WEBHOOK_URL }}/$SERVICE" \
+            -d '{"prune": true, "dryRun": false}' \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ ArgoCD webhook triggered successfully for $SERVICE"
+          else
+            echo "⚠️ ArgoCD webhook failed, but auto-sync will still work"
+          fi
+        else
+          echo "⚠️ ARGOCD_WEBHOOK_URL not configured, falling back to auto-sync"
+          echo "ArgoCD will automatically sync when Repo B is updated..."
+        fi
+        
         echo "Timestamp updated: $(date)"
 
 

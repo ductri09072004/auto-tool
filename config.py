@@ -10,6 +10,7 @@ import os
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 GHCR_TOKEN = os.getenv('GHCR_TOKEN', '')
 MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
+ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://6faeaf22e11a.ngrok-free.app/api/webhook')
 
 # Dashboard token - can be set for read-only operations
 DASHBOARD_TOKEN = os.getenv('DASHBOARD_TOKEN', '')
@@ -18,6 +19,7 @@ DASHBOARD_TOKEN = os.getenv('DASHBOARD_TOKEN', '')
 # - GITHUB_TOKEN: For general GitHub API operations (create repos, push code)
 # - GHCR_TOKEN: For GitHub Container Registry (push Docker images)
 # - MANIFESTS_REPO_TOKEN: For Repository B operations (push K8s manifests)
+# - ARGOCD_WEBHOOK_URL: For ArgoCD webhook trigger (immediate sync)
 # - DASHBOARD_TOKEN: For dashboard read-only operations (view services list)
 
 # Monitoring Configuration
@@ -31,7 +33,7 @@ GITHUB_ORG = os.getenv('GITHUB_ORG', 'your_organization')
 DEFAULT_REPO_B_URL = os.getenv('DEFAULT_REPO_B_URL', 'https://github.com/ductri09072004/demo_fiss1_B')
 
 # Webhook Configuration
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://meagan-submucronate-telephonically.ngrok-free.dev/api/github/webhook')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://6faeaf22e11a.ngrok-free.app/api/github/webhook')
 
 # Template Paths
 TEMPLATE_A_PATH = r"E:\Study\Auto_project_tool\templates_src\repo_a_template"
@@ -76,6 +78,10 @@ TOKEN_INFO = {
     'MANIFESTS_REPO_TOKEN': {
         'description': 'Repository B (Manifests) access',
         'usage': ['Push K8s manifests', 'Update deployment files', 'Manage ArgoCD applications']
+    },
+    'ARGOCD_WEBHOOK_URL': {
+        'description': 'ArgoCD webhook URL for immediate sync',
+        'usage': ['Trigger immediate ArgoCD sync', 'Bypass auto-sync delay', 'Force deployment update']
     }
 }
 

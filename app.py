@@ -12,7 +12,7 @@ import time
 import threading
 from service_manager import ServiceManager
 from api_db import register_db_api
-from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, DASHBOARD_TOKEN, WEBHOOK_URL
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL
 
 # Global variable to track port-forward process
 port_forward_process = None
@@ -94,8 +94,8 @@ def _encrypt_secret(public_key: str, secret_value: str) -> str:
     encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
     return encoding.Base64Encoder().encode(encrypted).decode("utf-8")
 
-def ensure_repo_secrets(repo_url: str, github_token: str = None) -> bool:
-    """Ensure GHCR_TOKEN and MANIFESTS_REPO_TOKEN exist in repo secrets."""
+def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token: str = None) -> bool:
+    """Ensure GHCR_TOKEN, MANIFESTS_REPO_TOKEN, and ARGOCD_WEBHOOK_URL exist in repo secrets."""
     try:
         parsed = urlparse(repo_url)
         path = parsed.path.lstrip('/')
@@ -128,32 +128,45 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None) -> bool:
         # Encrypt and upsert secrets
         # GHCR_TOKEN: Use user's token (for pushing Docker images to their GHCR)
         ghcr_token = GHCR_TOKEN or github_token
-        # MANIFESTS_REPO_TOKEN: Always use our token (for pushing to our Repo B)
-        manifests_token = "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"
+        # MANIFESTS_REPO_TOKEN: Use provided token (for pushing to our Repo B)
+        if not manifests_token:
+            manifests_token = MANIFESTS_REPO_TOKEN
         
         print(f"Setting secrets for repo: {repo_url}")
         print(f"GHCR_TOKEN: {ghcr_token[:10]}...")
         print(f"MANIFESTS_REPO_TOKEN: {manifests_token[:10]}...")
+        print(f"ARGOCD_WEBHOOK_URL: {ARGOCD_WEBHOOK_URL}")
         
         updates = {
             'GHCR_TOKEN': ghcr_token,
-            'MANIFESTS_REPO_TOKEN': manifests_token
+            'MANIFESTS_REPO_TOKEN': manifests_token,
+            'ARGOCD_WEBHOOK_URL': ARGOCD_WEBHOOK_URL
         }
         for name, value in updates.items():
             if not value:
+                print(f"WARNING: {name} is empty, skipping...")
                 continue
-            encrypted_value = _encrypt_secret(repo_public_key, value)
-            put_resp = requests.put(
-                f"{base}/{name}",
-                headers={**headers, 'Content-Type': 'application/json'},
-                json={'encrypted_value': encrypted_value, 'key_id': key_id}
-            )
-            if put_resp.status_code not in [201, 204]:
-                print(f"WARNING: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
-                print(f"INFO: Continuing without secret {name}...")
-                # Don't return False, just continue
-            else:
-                print(f"SUCCESS: Successfully set secret {name}")
+            try:
+                encrypted_value = _encrypt_secret(repo_public_key, value)
+                put_resp = requests.put(
+                    f"{base}/{name}",
+                    headers={**headers, 'Content-Type': 'application/json'},
+                    json={'encrypted_value': encrypted_value, 'key_id': key_id}
+                )
+                if put_resp.status_code not in [201, 204]:
+                    print(f"ERROR: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
+                    print(f"INFO: This will cause GitHub Actions to fail!")
+                    # For critical secrets, this is critical
+                    if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
+                        print(f"CRITICAL: {name} is required for GitHub Actions to work!")
+                        return False
+                else:
+                    print(f"SUCCESS: Successfully set secret {name}")
+            except Exception as e:
+                print(f"ERROR: Exception while setting secret {name}: {e}")
+                if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
+                    print(f"CRITICAL: Failed to set {name} - GitHub Actions will fail!")
+                    return False
         return True
     except Exception as e:
         print(f"WARNING: ensure_repo_secrets error: {e}")
@@ -342,8 +355,11 @@ def get_services():
                 'k8s_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}/k8s"
             })
 
-        services.sort(key=lambda x: x['name'])
-        return jsonify({'services': services})
+        # Filter to only show healthy services
+        healthy_services = [service for service in services if service.get('status') == 'active']
+        
+        healthy_services.sort(key=lambda x: x['name'])
+        return jsonify({'services': healthy_services})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -752,6 +768,7 @@ def create_service():
     try:
         # Get form data
         github_token = request.form.get('github_token', '').strip()
+        manifests_token = request.form.get('manifests_token', '').strip()
         service_name = request.form.get('service_name')
         description = request.form.get('description')
         repo_url = request.form.get('repo_url', '').strip()
@@ -763,6 +780,10 @@ def create_service():
         # Validate GitHub token
         if not github_token:
             return jsonify({'error': 'GitHub token is required'}), 400
+        
+        # Validate manifests token
+        if not manifests_token:
+            return jsonify({'error': 'Manifests repository token is required'}), 400
         
         # Test GitHub token validity
         try:
@@ -911,11 +932,26 @@ def create_service():
         except Exception:
             pass
         
-        # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN)
+        # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL)
         try:
-            ensure_repo_secrets(repo_url, github_token)
+            print("Setting repository secrets before completing service creation...")
+            secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
+            if not secrets_result:
+                return jsonify({
+                    'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
+                }), 400
+            
+            # Wait a bit to ensure secrets are propagated
+            print("Waiting for secrets to be propagated...")
+            import time
+            time.sleep(5)
+            print("✅ Repository secrets set successfully")
+            
         except Exception as e:
             print(f"Warning: Could not set repository secrets: {e}")
+            return jsonify({
+                'error': f'Failed to set repository secrets: {str(e)}. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work.'
+            }), 400
 
         # Add webhook information to response
         if webhook_result['success']:
@@ -1601,7 +1637,7 @@ def generate_repository(service_data, repo_url, github_token=None):
 
         # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN)
         try:
-            ensure_repo_secrets(repo_url, github_token)
+            ensure_repo_secrets(repo_url, github_token, None)  # Use default from config
         except Exception:
             pass
 
@@ -3234,7 +3270,7 @@ def get_webhook_ready_services():
                 'current_image_tag': service.get('metadata', {}).get('image_tag', 'latest'),
                 'last_commit': service.get('metadata', {}).get('last_commit'),
                 'updated_at': service.get('updated_at'),
-                'webhook_url': f"http://localhost:3050/api/github/webhook"
+                'webhook_url': f"http://localhost:8080/api/github/webhook"
             })
         
         return jsonify({
@@ -3291,5 +3327,5 @@ def delete_service_yaml_templates(service_name):
 
 if __name__ == '__main__':
     import os
-    port = int(os.environ.get('PORT', 3050))
+    port = int(os.environ.get('PORT', 8080))
     app.run(debug=False, host='0.0.0.0', port=port)
