@@ -203,27 +203,42 @@ def _delete_yaml_files_via_github_api(service_name, repo_url, yaml_files_to_dele
         for yaml_file in yaml_files_to_delete:
             file_path = f"services/{service_name}/k8s/{yaml_file}"
             
-            # Check if file exists
-            contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
-            get_response = requests.get(contents_url, headers=headers)
-            
-            if get_response.status_code == 200:
-                # File exists, delete it
-                existing_data = get_response.json()
-                delete_data = {
-                    'message': f'Delete {yaml_file} after ArgoCD sync for {service_name}',
-                    'sha': existing_data['sha']
-                }
+            # Retry logic for handling 409 conflicts
+            max_retries = 3
+            for attempt in range(max_retries):
+                # Check if file exists (get fresh SHA each time)
+                contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
+                get_response = requests.get(contents_url, headers=headers)
                 
-                delete_response = requests.delete(contents_url, headers=headers, json=delete_data)
-                
-                if delete_response.status_code in [200, 204]:
-                    print(f"Deleted {yaml_file}")
-                    deleted_count += 1
+                if get_response.status_code == 200:
+                    # File exists, delete it with fresh SHA
+                    existing_data = get_response.json()
+                    delete_data = {
+                        'message': f'Delete {yaml_file} after ArgoCD sync for {service_name}',
+                        'sha': existing_data['sha']
+                    }
+                    
+                    delete_response = requests.delete(contents_url, headers=headers, json=delete_data)
+                    
+                    if delete_response.status_code in [200, 204]:
+                        print(f"Deleted {yaml_file}")
+                        deleted_count += 1
+                        break  # Success, move to next file
+                    elif delete_response.status_code == 409:
+                        # Conflict - file was modified by another commit
+                        print(f"⚠️ Conflict deleting {yaml_file} (attempt {attempt + 1}/{max_retries}), retrying...")
+                        if attempt < max_retries - 1:
+                            import time
+                            time.sleep(1)  # Wait 1 second before retry
+                            continue
+                        else:
+                            print(f"Failed to delete {yaml_file} after {max_retries} attempts due to conflicts")
+                    else:
+                        print(f"Failed to delete {yaml_file}: {delete_response.status_code}")
+                        break
                 else:
-                    print(f"Failed to delete {yaml_file}: {delete_response.status_code}")
-            else:
-                print(f"File {yaml_file} not found, skipping")
+                    print(f"File {yaml_file} not found, skipping")
+                    break
         
         # Also delete ArgoCD Application file
         apps_file_path = f"apps/{service_name}-application.yaml"
@@ -270,10 +285,6 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
         
         # Push each file individually using Contents API
         for file_path, file_content in files_to_push.items():
-            # Check if file exists
-            contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
-            get_response = requests.get(contents_url, headers=headers)
-            
             # Prepare file data
             if isinstance(file_content, str):
                 content_bytes = file_content.encode('utf-8')
@@ -282,22 +293,41 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
             
             content_b64 = base64.b64encode(content_bytes).decode('utf-8')
             
-            file_data = {
-                'message': f'{commit_message} - {file_path}',
-                'content': content_b64
-            }
-            
-            if get_response.status_code == 200:
-                # File exists, update it
-                existing_data = get_response.json()
-                file_data['sha'] = existing_data['sha']
-                put_response = requests.put(contents_url, headers=headers, json=file_data)
-            else:
-                # File doesn't exist, create it
-                put_response = requests.put(contents_url, headers=headers, json=file_data)
-            
-            if put_response.status_code not in [200, 201]:
-                return {'success': False, 'error': f'Failed to push {file_path}: {put_response.status_code} - {put_response.text}'}
+            # Retry logic for handling 409 conflicts
+            max_retries = 3
+            for attempt in range(max_retries):
+                # Check if file exists (get fresh SHA each time)
+                contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
+                get_response = requests.get(contents_url, headers=headers)
+                
+                file_data = {
+                    'message': f'{commit_message} - {file_path}',
+                    'content': content_b64
+                }
+                
+                if get_response.status_code == 200:
+                    # File exists, update it with fresh SHA
+                    existing_data = get_response.json()
+                    file_data['sha'] = existing_data['sha']
+                    put_response = requests.put(contents_url, headers=headers, json=file_data)
+                else:
+                    # File doesn't exist, create it
+                    put_response = requests.put(contents_url, headers=headers, json=file_data)
+                
+                if put_response.status_code in [200, 201]:
+                    print(f"✅ Successfully pushed {file_path}")
+                    break  # Success, move to next file
+                elif put_response.status_code == 409:
+                    # Conflict - file was modified by another commit
+                    print(f"⚠️ Conflict for {file_path} (attempt {attempt + 1}/{max_retries}), retrying...")
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)  # Wait 1 second before retry
+                        continue
+                    else:
+                        return {'success': False, 'error': f'Failed to push {file_path} after {max_retries} attempts due to conflicts: {put_response.text}'}
+                else:
+                    return {'success': False, 'error': f'Failed to push {file_path}: {put_response.status_code} - {put_response.text}'}
         
         return {'success': True, 'message': f'Successfully pushed {len(files_to_push)} files'}
         
