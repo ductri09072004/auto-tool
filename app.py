@@ -14,6 +14,267 @@ from service_manager import ServiceManager
 from api_db import register_db_api
 from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL, TEMPLATE_A_PATH, TEMPLATE_B_PATH, FALLBACK_TEMPLATE_B, REPO_B_SERVICES_PATH
 
+# Environment detection
+def is_railway_environment():
+    """Check if running on Railway (cloud environment)"""
+    return os.getenv('RAILWAY_ENVIRONMENT') is not None or os.getenv('PORT') is not None
+
+def has_git_command():
+    """Check if git command is available"""
+    try:
+        subprocess.run(['git', '--version'], capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def _create_inline_template(template_name, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_name, image_tag):
+    """Create inline template content for Railway deployment when local templates are not available"""
+    
+    if template_name == 'deployment.yaml':
+        return f"""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {service_name}
+  namespace: {namespace}
+spec:
+  replicas: {replicas}
+  selector:
+    matchLabels:
+      app: {service_name}
+  template:
+    metadata:
+      labels:
+        app: {service_name}
+    spec:
+      containers:
+      - name: {service_name}
+        image: ghcr.io/{gh_owner}/{repo_name}:{image_tag}
+        ports:
+        - containerPort: {port}
+        resources:
+          requests:
+            memory: {memory_request}
+            cpu: {cpu_request}
+          limits:
+            memory: {memory_limit}
+            cpu: {cpu_limit}
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: {port}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: {port}
+          initialDelaySeconds: 5
+          periodSeconds: 5"""
+
+    elif template_name == 'service.yaml':
+        return f"""apiVersion: v1
+kind: Service
+metadata:
+  name: {service_name}
+  namespace: {namespace}
+spec:
+  selector:
+    app: {service_name}
+  ports:
+  - port: 80
+    targetPort: {port}
+  type: ClusterIP"""
+
+    elif template_name == 'configmap.yaml':
+        return f"""apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {service_name}-config
+  namespace: {namespace}
+data:
+  PORT: "{port}"
+  NODE_ENV: "production"
+  SERVICE_NAME: "{service_name}" """
+
+    elif template_name == 'hpa.yaml':
+        return f"""apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {service_name}-hpa
+  namespace: {namespace}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {service_name}
+  minReplicas: {min_replicas}
+  maxReplicas: {max_replicas}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70"""
+
+    elif template_name == 'ingress.yaml':
+        return f"""apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {service_name}-ingress
+  namespace: {namespace}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: {service_name}.example.local
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: {service_name}
+            port:
+              number: 80"""
+
+    elif template_name == 'ingress-gateway.yaml':
+        return f"""apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: {service_name}-vs
+  namespace: {namespace}
+spec:
+  hosts:
+  - {service_name}.example.local
+  gateways:
+  - {service_name}-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api
+    route:
+    - destination:
+        host: {service_name}
+        port:
+          number: 80"""
+
+    elif template_name == 'namespace.yaml':
+        return f"""apiVersion: v1
+kind: Namespace
+metadata:
+  name: {namespace}
+  labels:
+    name: {namespace}"""
+
+    elif template_name == 'secret.yaml':
+        return f"""apiVersion: v1
+kind: Secret
+metadata:
+  name: {service_name}-secret
+  namespace: {namespace}
+type: Opaque
+data:
+  # Add your secret data here
+  # Example: key: <base64-encoded-value>"""
+
+    else:
+        return f"# Template for {template_name} not implemented"
+
+def push_files_to_github_api(repo_url, files_to_push, commit_message, github_token):
+    """Push files to GitHub repository using GitHub API instead of git commands"""
+    try:
+        import re
+        import base64
+        
+        # Parse repository URL
+        match = re.search(r'github\.com/([^/]+)/([^/]+)', repo_url)
+        if not match:
+            return {'success': False, 'error': 'Invalid GitHub repository URL'}
+        
+        owner = match.group(1)
+        repo_name = match.group(2)
+        
+        # Get current commit SHA
+        headers = {'Authorization': f'token {github_token}', 'Accept': 'application/vnd.github+json'}
+        ref_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/refs/heads/main'
+        ref_response = requests.get(ref_url, headers=headers)
+        
+        if ref_response.status_code != 200:
+            return {'success': False, 'error': f'Failed to get current commit: {ref_response.status_code}'}
+        
+        current_sha = ref_response.json()['object']['sha']
+        
+        # Get current tree
+        commit_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/commits/{current_sha}'
+        commit_response = requests.get(commit_url, headers=headers)
+        
+        if commit_response.status_code != 200:
+            return {'success': False, 'error': f'Failed to get commit details: {commit_response.status_code}'}
+        
+        tree_sha = commit_response.json()['tree']['sha']
+        
+        # Create new tree with files
+        tree_items = []
+        for file_path, file_content in files_to_push.items():
+            if isinstance(file_content, str):
+                content_bytes = file_content.encode('utf-8')
+            else:
+                content_bytes = file_content
+            
+            content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+            
+            tree_items.append({
+                'path': file_path,
+                'mode': '100644',
+                'type': 'blob',
+                'content': content_b64
+            })
+        
+        # Create new tree
+        tree_data = {
+            'base_tree': tree_sha,
+            'tree': tree_items
+        }
+        
+        tree_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/trees'
+        tree_response = requests.post(tree_url, headers=headers, json=tree_data)
+        
+        if tree_response.status_code != 201:
+            return {'success': False, 'error': f'Failed to create tree: {tree_response.status_code}'}
+        
+        new_tree_sha = tree_response.json()['sha']
+        
+        # Create new commit
+        commit_data = {
+            'message': commit_message,
+            'tree': new_tree_sha,
+            'parents': [current_sha]
+        }
+        
+        commit_url = f'https://api.github.com/repos/{owner}/{repo_name}/git/commits'
+        commit_response = requests.post(commit_url, headers=headers, json=commit_data)
+        
+        if commit_response.status_code != 201:
+            return {'success': False, 'error': f'Failed to create commit: {commit_response.status_code}'}
+        
+        new_commit_sha = commit_response.json()['sha']
+        
+        # Update main branch
+        update_data = {
+            'sha': new_commit_sha
+        }
+        
+        update_response = requests.patch(ref_url, headers=headers, json=update_data)
+        
+        if update_response.status_code != 200:
+            return {'success': False, 'error': f'Failed to update branch: {update_response.status_code}'}
+        
+        return {'success': True, 'commit_sha': new_commit_sha}
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
 # Global variable to track port-forward process
 port_forward_process = None
 try:
@@ -2042,14 +2303,20 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             path_git = parsed_b.path if parsed_b.path.endswith('.git') else parsed_b.path + '.git'
             remote = f"{parsed_b.scheme}://{token_to_use}@{parsed_b.netloc}{path_git}"
 
-        # Clone Repo B to get current history
-        clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
-        if clone_proc.returncode != 0:
-            return {'success': False, 'error': f'Clone Repo B failed: {clone_proc.stderr}'}
+        # Check if we can use git commands or need to use GitHub API
+        if has_git_command() and not is_railway_environment():
+            # Use git commands for local development
+            clone_proc = subprocess.run(['git', 'clone', remote, clone_dir], capture_output=True, text=True)
+            if clone_proc.returncode != 0:
+                return {'success': False, 'error': f'Clone Repo B failed: {clone_proc.stderr}'}
 
-        # Ensure we are on latest main
-        subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
-        subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
+            # Ensure we are on latest main
+            subprocess.run(['git', 'fetch', 'origin', 'main'], cwd=clone_dir, check=False)
+            subprocess.run(['git', 'checkout', '-B', 'main', 'origin/main'], cwd=clone_dir, check=False)
+        else:
+            # Use GitHub API for Railway deployment
+            print("Using GitHub API instead of git commands (Railway environment)")
+            # We'll handle the push later using GitHub API
 
         # Prepare destination path and copy template manifests
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2060,8 +2327,15 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                 template_b = fallback
             else:
                 return {'success': False, 'error': f'Template B not found: {template_b}'}
+        
         # Create services/{SERVICE_NAME}/k8s structure with YAML files
-        service_dir = os.path.join(clone_dir, 'services', service_name)
+        if has_git_command() and not is_railway_environment():
+            # Local development - use cloned directory
+            service_dir = os.path.join(clone_dir, 'services', service_name)
+        else:
+            # Railway deployment - create temporary directory
+            service_dir = os.path.join(tmpdir, 'services', service_name)
+        
         k8s_dir = os.path.join(service_dir, 'k8s')
         os.makedirs(k8s_dir, exist_ok=True)
         
@@ -2081,35 +2355,55 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
                 'namespace.yaml',
                 'secret.yaml'
             ]
+        else:
+            # Fallback: create templates inline for Railway deployment
+            print("Using inline templates for Railway deployment")
+            yaml_files = [
+                'deployment.yaml',
+                'service.yaml', 
+                'configmap.yaml',
+                'hpa.yaml',
+                'ingress.yaml',
+                'ingress-gateway.yaml',
+                'namespace.yaml',
+                'secret.yaml'
+            ]
             
             for yaml_file in yaml_files:
-                src_file = os.path.join(k8s_template_dir, yaml_file)
-                if os.path.exists(src_file):
-                    dst_file = os.path.join(k8s_dir, yaml_file)
-                    
-                    # Read template content
-                    with open(src_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    
-                    # Replace placeholders
-                    content = content.replace('{SERVICE_NAME}', service_name)
-                    content = content.replace('{NAMESPACE}', namespace)
-                    content = content.replace('{PORT}', str(port))
-                    content = content.replace('{REPLICAS}', str(replicas))
-                    content = content.replace('{MIN_REPLICAS}', str(min_replicas))
-                    content = content.replace('{MAX_REPLICAS}', str(max_replicas))
-                    content = content.replace('{CPU_REQUEST}', cpu_request)
-                    content = content.replace('{CPU_LIMIT}', cpu_limit)
-                    content = content.replace('{MEMORY_REQUEST}', memory_request)
-                    content = content.replace('{MEMORY_LIMIT}', memory_limit)
-                    content = content.replace('{REPO_URL}', repo_url)
-                    content = content.replace('{IMAGE_TAG}', image_tag)
-                    
-                    # Write customized content
-                    with open(dst_file, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    
-                    print(f"Created {yaml_file} for {service_name}")
+                dst_file = os.path.join(k8s_dir, yaml_file)
+                
+                if os.path.exists(k8s_template_dir):
+                    # Use local template files
+                    src_file = os.path.join(k8s_template_dir, yaml_file)
+                    if os.path.exists(src_file):
+                        # Read template content
+                        with open(src_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                    else:
+                        continue
+                else:
+                    # Create inline template content for Railway
+                    content = _create_inline_template(yaml_file, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_a_name, image_tag)
+                
+                # Replace placeholders (for both local and inline templates)
+                content = content.replace('{SERVICE_NAME}', service_name)
+                content = content.replace('{NAMESPACE}', namespace)
+                content = content.replace('{PORT}', str(port))
+                content = content.replace('{REPLICAS}', str(replicas))
+                content = content.replace('{MIN_REPLICAS}', str(min_replicas))
+                content = content.replace('{MAX_REPLICAS}', str(max_replicas))
+                content = content.replace('{CPU_REQUEST}', cpu_request)
+                content = content.replace('{CPU_LIMIT}', cpu_limit)
+                content = content.replace('{MEMORY_REQUEST}', memory_request)
+                content = content.replace('{MEMORY_LIMIT}', memory_limit)
+                content = content.replace('{REPO_URL}', repo_url)
+                content = content.replace('{IMAGE_TAG}', image_tag)
+                
+                # Write customized content
+                with open(dst_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                print(f"Created {yaml_file} for {service_name}")
         
         # Auto-configure Prometheus
         try:
@@ -2128,7 +2422,13 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
             prometheus_result = f"Prometheus error: {str(e)}"
 
         # Create ArgoCD Application pointing to services/{SERVICE_NAME}/k8s
-        apps_dir = os.path.join(clone_dir, 'apps')
+        if has_git_command() and not is_railway_environment():
+            # Local development - use cloned directory
+            apps_dir = os.path.join(clone_dir, 'apps')
+        else:
+            # Railway deployment - use temporary directory
+            apps_dir = os.path.join(tmpdir, 'apps')
+        
         os.makedirs(apps_dir, exist_ok=True)
         app_file = os.path.join(apps_dir, f'{service_name}-application.yaml')
         
@@ -2172,22 +2472,73 @@ spec:
             f.write(app_content)
 
         # Commit and push all changes to Repo B
-        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-        if st.stdout.strip():
-            subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
-        push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
-        if push_proc.returncode != 0:
-            return {'success': False, 'error': push_proc.stderr}
+        if has_git_command() and not is_railway_environment():
+            # Use git commands for local development
+            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+            if st.stdout.strip():
+                subprocess.run(['git', 'commit', '-m', f'Add service {service_name} with YAML manifests'], cwd=clone_dir, check=True)
+            push_proc = subprocess.run(['git', 'push', 'origin', 'main'], cwd=clone_dir, capture_output=True, text=True)
+            if push_proc.returncode != 0:
+                return {'success': False, 'error': push_proc.stderr}
+        else:
+            # Use GitHub API for Railway deployment
+            print("Pushing files using GitHub API...")
+            
+            # Collect all files to push
+            files_to_push = {}
+            
+            # Walk through the service directory and collect all files
+            service_source_dir = os.path.join(tmpdir, 'services', service_name)
+            for root, dirs, files in os.walk(service_source_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, tmpdir)
+                    
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    files_to_push[relative_path] = content
+            
+            # Also add ArgoCD application file
+            apps_dir = os.path.join(tmpdir, 'apps')
+            if os.path.exists(apps_dir):
+                for root, dirs, files in os.walk(apps_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(file_path, tmpdir)
+                        
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        files_to_push[relative_path] = content
+            
+            # Push using GitHub API
+            push_result = push_files_to_github_api(
+                repo_b_url, 
+                files_to_push, 
+                f'Add service {service_name} with YAML manifests',
+                MANIFESTS_REPO_TOKEN
+            )
+            
+            if not push_result['success']:
+                return {'success': False, 'error': f'GitHub API push failed: {push_result["error"]}'}
+            
+            print(f"Successfully pushed files using GitHub API: {push_result.get('commit_sha', 'N/A')}")
 
         # Auto-deploy ArgoCD Application after successful push
-        try:
-            subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
-            print(f"ArgoCD Application '{service_name}' deployed successfully")
-        except subprocess.CalledProcessError as e:
-            print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
+        if has_git_command() and not is_railway_environment():
+            # Use kubectl for local development
+            try:
+                subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
+                print(f"ArgoCD Application '{service_name}' deployed successfully")
+            except subprocess.CalledProcessError as e:
+                print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
+        else:
+            # On Railway, ArgoCD Application will be deployed manually or via other means
+            print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
             # Continue anyway - user can apply manually
         
         print(f"Service '{service_name}' created with YAML manifests in Repo B")
