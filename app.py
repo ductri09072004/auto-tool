@@ -2935,7 +2935,7 @@ spec:
                     # ArgoCD has synced, safe to delete YAML files
                     print(f"ArgoCD synced successfully for {service_name}, deleting YAML files...")
                     
-                        try:
+                    try:
                         # Delete YAML files from Repo B
                         yaml_files_to_delete = [
                             'deployment.yaml',
@@ -3040,10 +3040,10 @@ spec:
                             shutil.rmtree(clone_dir)
                             print(f"Cleaned up temp directory")
                             
-                        except Exception as cleanup_error:
-                            print(f"❌ Error during YAML cleanup: {cleanup_error}")
-                            import traceback
-                            traceback.print_exc()
+                    except Exception as cleanup_error:
+                        print(f"❌ Error during YAML cleanup: {cleanup_error}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     print(f"ArgoCD sync not completed for {service_name}, keeping YAML files")
                     
