@@ -1625,17 +1625,9 @@ def create_service():
                     'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
                 }), 400
             
-            # Wait longer to ensure secrets are propagated
-            print("Waiting for secrets to be propagated...")
-            import time
-            time.sleep(45)  # Increased from 30 to 45 seconds
+            # Secrets are set immediately - no delays needed
             print("✅ Repository secrets set successfully")
-            print("⏳ Additional wait to ensure GitHub Actions can access secrets...")
-            time.sleep(30)  # Increased from 15 to 30 seconds for GitHub Actions
-            print("✅ Secrets should now be available for GitHub Actions")
-            print("⏳ Final wait to ensure GitHub API has fully propagated secrets...")
-            time.sleep(15)  # Additional 15 seconds for GitHub API propagation
-            print("✅ All secrets should now be fully available for GitHub Actions")
+            print("✅ Secrets are immediately available for GitHub Actions")
             
             # Verify secrets are actually accessible via GitHub API
             print("🔍 Verifying secrets are accessible via GitHub API...")

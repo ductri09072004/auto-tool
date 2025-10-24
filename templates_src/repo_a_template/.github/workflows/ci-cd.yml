@@ -115,53 +115,64 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     permissions:
       contents: write
+    # Only run if all required secrets are available
+    env:
+      SECRETS_READY: ${{ secrets.MANIFESTS_REPO_TOKEN != '' && secrets.ARGOCD_WEBHOOK_URL != '' && secrets.GHCR_TOKEN != '' }}
     
     steps:
-    - name: Wait for secrets to be available
+    - name: Verify all required secrets are available
       run: |
-        echo "Waiting for repository secrets to be set..."
-        echo "This step ensures secrets are properly propagated before CI/CD runs..."
-        sleep 30  # Increased initial wait time
-        
-        echo "Checking for MANIFESTS_REPO_TOKEN..."
+        echo "🔍 Checking for all required secrets..."
         echo "Repository: ${{ github.repository }}"
         echo "Event: ${{ github.event_name }}"
         echo "Ref: ${{ github.ref }}"
         
-        # Retry mechanism for checking secrets with longer wait times
-        for i in {1..20}; do
-          if [ -n "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
-            echo "✅ MANIFESTS_REPO_TOKEN is available (attempt $i)"
-            echo "Token length: ${#MANIFESTS_REPO_TOKEN}"
-            break
-          else
-            echo "⏳ MANIFESTS_REPO_TOKEN not ready yet (attempt $i/20)"
-            if [ $i -eq 20 ]; then
-              echo "ERROR: MANIFESTS_REPO_TOKEN is required to push to Repo B."
-              echo "Please add it in Settings > Secrets and variables > Actions."
-              echo "This token should have been set automatically when the service was created."
-              echo "If this is a new service, please re-run the service creation process."
-              echo "Alternatively, you can manually re-run this workflow after a few minutes."
-              echo ""
-              echo "Debug info:"
-              echo "  Repository: ${{ github.repository }}"
-              echo "  Event: ${{ github.event_name }}"
-              echo "  Ref: ${{ github.ref }}"
-              echo "  Actor: ${{ github.actor }}"
-              echo "  Workflow run: ${{ github.run_id }}"
-              echo "  Workflow run number: ${{ github.run_number }}"
-              echo ""
-              echo "🔧 Troubleshooting steps:"
-              echo "1. Check if secrets are set in repository settings"
-              echo "2. Wait 5-10 minutes and re-run this workflow"
-              echo "3. Contact support if issue persists"
-              exit 1
-            fi
-            sleep 20  # Increased wait time between retries
-          fi
-        done
+        # Check all required secrets
+        if [ -z "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
+          echo "❌ MANIFESTS_REPO_TOKEN is missing"
+          echo "This token should have been set automatically when the service was created."
+          echo "Please ensure the service creation process completed successfully."
+          exit 1
+        fi
+        
+        if [ -z "${{ secrets.ARGOCD_WEBHOOK_URL }}" ]; then
+          echo "❌ ARGOCD_WEBHOOK_URL is missing"
+          echo "This URL should have been set automatically when the service was created."
+          echo "Please ensure the service creation process completed successfully."
+          exit 1
+        fi
+        
+        if [ -z "${{ secrets.GHCR_TOKEN }}" ]; then
+          echo "❌ GHCR_TOKEN is missing"
+          echo "This token should have been set automatically when the service was created."
+          echo "Please ensure the service creation process completed successfully."
+          exit 1
+        fi
+        
+        echo "✅ All required secrets are available:"
+        echo "  - MANIFESTS_REPO_TOKEN: ${#MANIFESTS_REPO_TOKEN} characters"
+        echo "  - ARGOCD_WEBHOOK_URL: ${#ARGOCD_WEBHOOK_URL} characters"
+        echo "  - GHCR_TOKEN: ${#GHCR_TOKEN} characters"
+    
+    - name: Skip deployment - secrets not ready
+      if: env.SECRETS_READY != 'true'
+      run: |
+        echo "⏸️ Skipping deployment - secrets not ready"
+        echo "This workflow will run automatically once secrets are properly set."
+        echo "Please ensure the service was created successfully with all required tokens."
+        echo ""
+        echo "Required secrets status:"
+        echo "  - MANIFESTS_REPO_TOKEN: ${{ secrets.MANIFESTS_REPO_TOKEN != '' }}"
+        echo "  - ARGOCD_WEBHOOK_URL: ${{ secrets.ARGOCD_WEBHOOK_URL != '' }}"
+        echo "  - GHCR_TOKEN: ${{ secrets.GHCR_TOKEN != '' }}"
+        echo ""
+        echo "🔧 Next steps:"
+        echo "1. Ensure service creation completed successfully"
+        echo "2. Check repository secrets in Settings > Secrets and variables > Actions"
+        echo "3. Re-run this workflow once secrets are available"
 
     - name: Checkout manifests repo
+      if: env.SECRETS_READY == 'true'
       uses: actions/checkout@v4
       with:
         repository: ductri09072004/demo_fiss1_B
@@ -169,6 +180,7 @@ jobs:
         path: manifests
         
     - name: Update image tag
+      if: env.SECRETS_READY == 'true'
       run: |
         cd manifests
         SERVICE="${{ github.event.repository.name }}"
@@ -180,6 +192,7 @@ jobs:
         sed -i "s|timestamp: \".*\"|timestamp: \"$TS\"|g" "$FILE"
         
     - name: Commit and push changes
+      if: env.SECRETS_READY == 'true'
       run: |
         cd manifests
         git config --local user.email "action@github.com"
@@ -190,6 +203,7 @@ jobs:
         git push
         
     - name: Trigger ArgoCD Webhook for Immediate Sync
+      if: env.SECRETS_READY == 'true'
       run: |
         SERVICE="${{ github.event.repository.name }}"
         echo "Triggering ArgoCD webhook for immediate sync of $SERVICE..."
