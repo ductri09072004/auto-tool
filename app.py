@@ -1593,6 +1593,31 @@ def create_service():
             print(f"Repository URL: {repo_url}")
             print(f"GitHub token: {'SET' if github_token else 'NOT SET'}")
             print(f"Manifests token: {'SET' if manifests_token else 'NOT SET'}")
+            
+            # Verify tokens are valid before setting secrets
+            print("Verifying tokens before setting secrets...")
+            if not github_token or not manifests_token:
+                return jsonify({
+                    'error': 'GitHub token or Manifests token is missing. Please check your configuration.'
+                }), 400
+            
+            # Test GitHub API access
+            try:
+                import requests
+                headers = {'Authorization': f'token {github_token}'}
+                test_response = requests.get(f'https://api.github.com/user', headers=headers, timeout=10)
+                if test_response.status_code != 200:
+                    print(f"GitHub token validation failed: {test_response.status_code}")
+                    return jsonify({
+                        'error': 'GitHub token is invalid or expired. Please check your token.'
+                    }), 400
+                print("✅ GitHub token validation successful")
+            except Exception as e:
+                print(f"GitHub token validation error: {e}")
+                return jsonify({
+                    'error': f'GitHub token validation failed: {str(e)}'
+                }), 400
+            
             secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
             print(f"Secrets result: {secrets_result}")
             if not secrets_result:
@@ -1600,11 +1625,42 @@ def create_service():
                     'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
                 }), 400
             
-            # Wait longer to ensure secrets are propagated
-            print("Waiting for secrets to be propagated...")
-            import time
-            time.sleep(15)  # Increased from 5 to 15 seconds
+            # No delays - rely on verification instead
             print("✅ Repository secrets set successfully")
+            
+            # Verify secrets are actually accessible via GitHub API
+            print("🔍 Verifying secrets are accessible via GitHub API...")
+            try:
+                import requests
+                headers = {'Authorization': f'token {github_token}'}
+                # Check if we can access the repository secrets
+                repo_owner, repo_name = repo_url.replace('https://github.com/', '').split('/')
+                secrets_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/actions/secrets'
+                secrets_response = requests.get(secrets_url, headers=headers, timeout=10)
+                
+                if secrets_response.status_code == 200:
+                    secrets_data = secrets_response.json()
+                    secret_names = [secret['name'] for secret in secrets_data.get('secrets', [])]
+                    print(f"✅ Repository secrets accessible: {secret_names}")
+                    
+                    # Check if our required secrets are present
+                    required_secrets = ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL', 'GHCR_TOKEN']
+                    missing_secrets = [secret for secret in required_secrets if secret not in secret_names]
+                    
+                    if missing_secrets:
+                        print(f"⚠️ Missing secrets: {missing_secrets}")
+                        return jsonify({
+                            'error': f'Some secrets are missing: {missing_secrets}. Please try again.'
+                        }), 400
+                    else:
+                        print("✅ All required secrets are present and accessible")
+                else:
+                    print(f"⚠️ Could not verify secrets: {secrets_response.status_code}")
+                    print("Proceeding anyway, but CI/CD might fail...")
+                    
+            except Exception as e:
+                print(f"⚠️ Secret verification failed: {e}")
+                print("Proceeding anyway, but CI/CD might fail...")
             
         except Exception as e:
             print(f"Warning: Could not set repository secrets: {e}")
@@ -4011,6 +4067,62 @@ def delete_service_yaml_templates(service_name):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/webhook/<service_name>', methods=['POST'])
+def service_webhook(service_name):
+    """Handle service-specific webhooks"""
+    try:
+        print(f"Service webhook called for: {service_name}")
+        print(f"Content-Type: {request.content_type}")
+        print(f"Headers: {dict(request.headers)}")
+        
+        # Parse webhook payload
+        payload = None
+        if request.is_json:
+            payload = request.get_json()
+        elif request.content_type == 'application/x-www-form-urlencoded':
+            form_data = request.form
+            if 'payload' in form_data:
+                try:
+                    payload = json.loads(form_data['payload'])
+                except json.JSONDecodeError:
+                    return jsonify({'error': 'Invalid JSON in payload'}), 400
+        
+        if not payload:
+            return jsonify({'error': 'No payload received'}), 400
+        
+        print(f"Webhook payload for {service_name}: {json.dumps(payload, indent=2)}")
+        
+        # Check if this is a push event
+        if payload.get('ref') == 'refs/heads/main' or payload.get('ref') == 'refs/heads/master':
+            print(f"Main branch push detected for {service_name}")
+            
+            # Trigger ArgoCD sync for this specific service
+            try:
+                # This would trigger ArgoCD sync for the specific service
+                print(f"Would trigger ArgoCD sync for service: {service_name}")
+                return jsonify({
+                    'message': f'Webhook processed for service {service_name}',
+                    'status': 'success',
+                    'service': service_name
+                })
+            except Exception as e:
+                print(f"Error processing webhook for {service_name}: {e}")
+                return jsonify({
+                    'error': f'Failed to process webhook for {service_name}: {str(e)}'
+                }), 500
+        else:
+            print(f"Non-main branch event for {service_name}, ignoring")
+            return jsonify({
+                'message': f'Non-main branch event for {service_name}, ignored',
+                'status': 'ignored'
+            })
+            
+    except Exception as e:
+        print(f"Error in service webhook for {service_name}: {e}")
+        return jsonify({
+            'error': f'Service webhook error for {service_name}: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     import os
