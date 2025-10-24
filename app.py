@@ -27,16 +27,67 @@ def has_git_command():
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+def _get_argocd_session_token():
+    """Get ArgoCD session token using admin password"""
+    try:
+        from config import ARGOCD_SERVER_URL, ARGOCD_ADMIN_PASSWORD
+        import requests
+        
+        if not ARGOCD_ADMIN_PASSWORD:
+            print("❌ ARGOCD_ADMIN_PASSWORD not set")
+            return None
+        
+        # Login to ArgoCD to get session token
+        login_url = f"{ARGOCD_SERVER_URL}/api/v1/session"
+        login_data = {
+            "username": "admin",
+            "password": ARGOCD_ADMIN_PASSWORD
+        }
+        
+        print(f"🔐 Attempting to login to ArgoCD at {login_url}")
+        response = requests.post(login_url, json=login_data, timeout=10, verify=False)
+        
+        if response.status_code == 200:
+            token = response.json().get('token')
+            if token:
+                print(f"✅ Successfully obtained ArgoCD session token")
+                return token
+            else:
+                print("❌ No token in response")
+                return None
+        else:
+            print(f"❌ Login failed: {response.status_code} {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error getting session token: {e}")
+        return None
+
 def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
     """Deploy ArgoCD Application via ArgoCD API instead of kubectl"""
     try:
         # Get ArgoCD server URL and token from config
-        from config import ARGOCD_SERVER_URL, ARGOCD_TOKEN
+        from config import ARGOCD_SERVER_URL, ARGOCD_TOKEN, ARGOCD_ADMIN_PASSWORD
         argocd_server = ARGOCD_SERVER_URL
         argocd_token = ARGOCD_TOKEN
         
+        # Debug logging
+        print(f"🔍 ArgoCD Debug Info:")
+        print(f"   Server URL: {argocd_server}")
+        print(f"   Token: {'SET' if argocd_token else 'NOT SET'}")
+        print(f"   Admin Password: {'SET' if ARGOCD_ADMIN_PASSWORD else 'NOT SET'}")
+        
+        # If no token, try to get session token using admin password
+        if not argocd_token and ARGOCD_ADMIN_PASSWORD:
+            print("🔑 No ARGOCD_TOKEN found, trying to get session token...")
+            argocd_token = _get_argocd_session_token()
+            if argocd_token:
+                print("✅ Successfully obtained session token")
+            else:
+                print("❌ Failed to get session token")
+        
         if not argocd_token:
-            return {'success': False, 'error': 'ARGOCD_TOKEN not configured'}
+            return {'success': False, 'error': 'ARGOCD_TOKEN not configured and cannot get session token'}
         
         # Prepare application data
         app_data = {
@@ -88,7 +139,7 @@ def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
         
         # Try to create application
         create_url = f"{argocd_server}/api/v1/applications"
-        response = requests.post(create_url, json=app_data, headers=headers, timeout=30)
+        response = requests.post(create_url, json=app_data, headers=headers, timeout=30, verify=False)
         
         if response.status_code in [200, 201]:
             print(f"✅ ArgoCD Application '{service_name}' created successfully")
@@ -97,7 +148,7 @@ def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
             # Application already exists, try to update
             print(f"Application '{service_name}' already exists, updating...")
             update_url = f"{argocd_server}/api/v1/applications/{service_name}"
-            update_response = requests.put(update_url, json=app_data, headers=headers, timeout=30)
+            update_response = requests.put(update_url, json=app_data, headers=headers, timeout=30, verify=False)
             
             if update_response.status_code in [200, 201]:
                 print(f"✅ ArgoCD Application '{service_name}' updated successfully")
