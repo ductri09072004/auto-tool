@@ -1432,32 +1432,9 @@ def create_service():
         repo_b_path = request.form.get('repo_b_path', '').strip()
         image_tag_mode = request.form.get('image_tag_mode', 'latest').strip()
         
-        # Debug logging for tokens
-        print(f"DEBUG: github_token from form: {'SET' if github_token else 'NOT SET'}")
-        print(f"DEBUG: manifests_token from form: {'SET' if manifests_token else 'NOT SET'}")
-        print(f"DEBUG: service_name: {service_name}")
-        print(f"DEBUG: repo_url: {repo_url}")
-        print(f"DEBUG: All form data: {dict(request.form)}")
-        print(f"DEBUG: Request method: {request.method}")
-        print(f"DEBUG: Content type: {request.content_type}")
-        
-        # Fallback to config tokens if form data is empty
-        if not github_token:
-            from config import GHCR_TOKEN
-            github_token = GHCR_TOKEN
-            print(f"DEBUG: Using github_token from config: {'SET' if github_token else 'NOT SET'}")
-        
-        if not manifests_token:
-            from config import MANIFESTS_REPO_TOKEN
-            manifests_token = MANIFESTS_REPO_TOKEN
-            print(f"DEBUG: Using manifests_token from config: {'SET' if manifests_token else 'NOT SET'}")
-        
         # Validate GitHub token
         if not github_token:
-            return jsonify({
-                'error': 'GitHub token is required. Please provide it in the form or set GHCR_TOKEN environment variable.',
-                'details': 'No GitHub token found in form data or environment variables.'
-            }), 400
+            return jsonify({'error': 'GitHub token is required'}), 400
         
         # Validate manifests token
         if not manifests_token:
@@ -1626,8 +1603,9 @@ def create_service():
             
             # Test GitHub API access
             try:
+                import requests
                 headers = {'Authorization': f'token {github_token}'}
-                test_response = requests.get('https://api.github.com/user', headers=headers, timeout=10)
+                test_response = requests.get(f'https://api.github.com/user', headers=headers, timeout=10)
                 if test_response.status_code != 200:
                     print(f"GitHub token validation failed: {test_response.status_code}")
                     return jsonify({
@@ -1654,6 +1632,7 @@ def create_service():
             # Verify secrets are actually accessible via GitHub API
             print("🔍 Verifying secrets are accessible via GitHub API...")
             try:
+                import requests
                 headers = {'Authorization': f'token {github_token}'}
                 # Check if we can access the repository secrets
                 repo_owner, repo_name = repo_url.replace('https://github.com/', '').split('/')
