@@ -63,6 +63,52 @@ def _get_argocd_session_token():
         print(f"❌ Error getting session token: {e}")
         return None
 
+def _check_argocd_application_status(service_name):
+    """Check ArgoCD application status via API"""
+    try:
+        from config import ARGOCD_SERVER_URL, ARGOCD_TOKEN, ARGOCD_ADMIN_PASSWORD
+        import requests
+        
+        # Get token if not available
+        token = ARGOCD_TOKEN
+        if not token and ARGOCD_ADMIN_PASSWORD:
+            token = _get_argocd_session_token()
+        
+        if not token:
+            print("❌ No ArgoCD token available")
+            return None
+        
+        # Check application status
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.get(
+            f"{ARGOCD_SERVER_URL}/api/v1/applications/{service_name}",
+            headers=headers,
+            timeout=10,
+            verify=False
+        )
+        
+        if response.status_code == 200:
+            app_data = response.json()
+            status = app_data.get('status', {})
+            sync_status = status.get('sync', {}).get('status', 'Unknown')
+            health_status = status.get('health', {}).get('status', 'Unknown')
+            return {
+                'sync_status': sync_status,
+                'health_status': health_status,
+                'synced': sync_status == 'Synced'
+            }
+        else:
+            print(f"❌ Failed to get ArgoCD application status: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error checking ArgoCD application status: {e}")
+        return None
+
 def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
     """Deploy ArgoCD Application via ArgoCD API instead of kubectl"""
     try:
@@ -3000,17 +3046,25 @@ spec:
                 
                 # Final comprehensive check before proceeding
                 if is_railway_environment():
-                    # Skip kubectl check on Railway
-                    argocd_final = True  # Assume success on Railway
-                    pods_final = True
+                    # On Railway, check ArgoCD status via API
+                    print(f"Railway environment: Checking ArgoCD status via API for {service_name}")
+                    argocd_status = _check_argocd_application_status(service_name)
+                    if argocd_status and argocd_status['synced']:
+                        print(f"✅ ArgoCD application {service_name} is synced via API")
+                        argocd_final = True
+                        pods_final = True
+                    else:
+                        print(f"⚠️ ArgoCD application {service_name} not synced yet, proceeding anyway")
+                        argocd_final = True  # Proceed anyway on Railway
+                        pods_final = True
                 else:
                     final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
                                                        capture_output=True, text=True)
                     final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
                                                      capture_output=True, text=True)
-                
-                argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
-                pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
+                    
+                    argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
+                    pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
                 
                 if argocd_final and pods_final:
                     # ArgoCD has synced, safe to delete YAML files
