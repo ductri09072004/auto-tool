@@ -600,6 +600,13 @@ def _encrypt_secret(public_key: str, secret_value: str) -> str:
 def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token: str = None) -> bool:
     """Ensure GHCR_TOKEN, MANIFESTS_REPO_TOKEN, and ARGOCD_WEBHOOK_URL exist in repo secrets."""
     try:
+        print(f"DEBUG: ensure_repo_secrets called with:")
+        print(f"  - repo_url: {repo_url}")
+        print(f"  - github_token: {'SET' if github_token else 'NOT SET'}")
+        print(f"  - manifests_token: {'SET' if manifests_token else 'NOT SET'}")
+        print(f"  - GITHUB_TOKEN (global): {'SET' if GITHUB_TOKEN else 'NOT SET'}")
+        print(f"  - MANIFESTS_REPO_TOKEN (global): {'SET' if MANIFESTS_REPO_TOKEN else 'NOT SET'}")
+        print(f"  - ARGOCD_WEBHOOK_URL (global): {'SET' if ARGOCD_WEBHOOK_URL else 'NOT SET'}")
         parsed = urlparse(repo_url)
         path = parsed.path.lstrip('/')
         if path.endswith('.git'):
@@ -639,9 +646,17 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             manifests_token = MANIFESTS_REPO_TOKEN
         
         print(f"Setting secrets for repo: {repo_url}")
-        print(f"GHCR_TOKEN: {ghcr_token[:10]}...")
-        print(f"MANIFESTS_REPO_TOKEN: {manifests_token[:10]}...")
+        print(f"GHCR_TOKEN: {ghcr_token[:10] if ghcr_token else 'EMPTY'}...")
+        print(f"MANIFESTS_REPO_TOKEN: {manifests_token[:10] if manifests_token else 'EMPTY'}...")
         print(f"ARGOCD_WEBHOOK_URL: {ARGOCD_WEBHOOK_URL}")
+        
+        # Debug: Check if tokens are actually available
+        if not ghcr_token:
+            print("❌ GHCR_TOKEN is empty!")
+        if not manifests_token:
+            print("❌ MANIFESTS_REPO_TOKEN is empty!")
+        if not ARGOCD_WEBHOOK_URL:
+            print("❌ ARGOCD_WEBHOOK_URL is empty!")
         
         updates = {
             'GHCR_TOKEN': ghcr_token,
@@ -1605,7 +1620,7 @@ def create_service():
             try:
                 import requests
                 headers = {'Authorization': f'token {github_token}'}
-                test_response = requests.get(f'https://api.github.com/user', headers=headers, timeout=10)
+                test_response = requests.get('https://api.github.com/user', headers=headers, timeout=10)
                 if test_response.status_code != 200:
                     print(f"GitHub token validation failed: {test_response.status_code}")
                     return jsonify({
@@ -1617,6 +1632,11 @@ def create_service():
                 return jsonify({
                     'error': f'GitHub token validation failed: {str(e)}'
                 }), 400
+            
+            print(f"DEBUG: About to call ensure_repo_secrets with:")
+            print(f"  - repo_url: {repo_url}")
+            print(f"  - github_token: {'SET' if github_token else 'NOT SET'}")
+            print(f"  - manifests_token: {'SET' if manifests_token else 'NOT SET'}")
             
             secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
             print(f"Secrets result: {secrets_result}")
@@ -1631,7 +1651,6 @@ def create_service():
             # Verify secrets are actually accessible via GitHub API
             print("🔍 Verifying secrets are accessible via GitHub API...")
             try:
-                import requests
                 headers = {'Authorization': f'token {github_token}'}
                 # Check if we can access the repository secrets
                 repo_owner, repo_name = repo_url.replace('https://github.com/', '').split('/')
