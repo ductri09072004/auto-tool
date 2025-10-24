@@ -622,16 +622,30 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             'Accept': 'application/vnd.github+json'
         }
 
+        # Test GitHub API access first
+        print(f"Testing GitHub API access...")
+        test_resp = requests.get(f"https://api.github.com/repos/{owner}/{repo_name}", headers=headers)
+        print(f"Repository access test: {test_resp.status_code}")
+        if test_resp.status_code != 200:
+            print(f"ERROR: Cannot access repository: {test_resp.status_code} {test_resp.text}")
+            return False
+        
         # Fetch public key
         print(f"Fetching public key from: {base}/public-key")
         print(f"Using token: {token_to_use[:10]}..." if token_to_use else "No token")
+        print(f"Headers: {headers}")
+        print(f"Repository URL: {repo_url}")
+        print(f"Owner: {owner}, Repo: {repo_name}")
+        
         pk_resp = requests.get(f"{base}/public-key", headers=headers)
         print(f"Public key response: {pk_resp.status_code}")
+        print(f"Public key response text: {pk_resp.text[:200]}...")
         if pk_resp.status_code != 200:
-            print(f"WARNING: Cannot access repo secrets: {pk_resp.status_code} {pk_resp.text}")
+            print(f"ERROR: Cannot access repo secrets: {pk_resp.status_code} {pk_resp.text}")
             print(f"INFO: This might be because Actions is not enabled or no permission")
-            print(f"INFO: Continuing without setting secrets...")
-            return True  # Continue deployment, just skip secrets
+            print(f"INFO: Repository might not exist yet or token doesn't have permission")
+            print(f"INFO: This will cause GitHub Actions to fail!")
+            return False  # Return False to indicate failure
         pk_json = pk_resp.json()
         repo_public_key = pk_json.get('key')
         key_id = pk_json.get('key_id')
@@ -673,12 +687,22 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             max_retries = 3
             for attempt in range(max_retries):
                 try:
+                    print(f"Setting secret {name} (attempt {attempt + 1}/{max_retries})...")
+                    print(f"  - Value length: {len(value)} characters")
+                    print(f"  - Public key: {repo_public_key[:20]}...")
+                    print(f"  - Key ID: {key_id}")
+                    
                     encrypted_value = _encrypt_secret(repo_public_key, value)
+                    print(f"  - Encrypted value length: {len(encrypted_value)}")
+                    
                     put_resp = requests.put(
                         f"{base}/{name}",
                         headers={**headers, 'Content-Type': 'application/json'},
                         json={'encrypted_value': encrypted_value, 'key_id': key_id}
                     )
+                    print(f"  - Response status: {put_resp.status_code}")
+                    print(f"  - Response text: {put_resp.text[:200]}...")
+                    
                     if put_resp.status_code in [201, 204]:
                         print(f"SUCCESS: Successfully set secret {name}")
                         break
@@ -1661,8 +1685,12 @@ def create_service():
                     'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
                 }), 400
             
-            # No delays - rely on verification instead
+            # Short delay to ensure secrets are propagated to GitHub Actions
             print("✅ Repository secrets set successfully")
+            print("⏳ Brief wait to ensure GitHub Actions can access secrets...")
+            import time
+            time.sleep(10)  # Short delay for GitHub API propagation
+            print("✅ Secrets should now be available for GitHub Actions")
             
             # Verify secrets are actually accessible via GitHub API
             print("🔍 Verifying secrets are accessible via GitHub API...")
