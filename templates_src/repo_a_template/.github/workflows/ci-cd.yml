@@ -2,23 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop, master ]
-    paths-ignore:
-      - 'README.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/workflows/ci-cd.yml'  # Ignore workflow file changes
+    branches: [ main, develop ,master]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # Allow manual trigger
-    inputs:
-      force_run:
-        description: 'Force run even if secrets are not ready'
-        required: false
-        default: false
-        type: boolean
-  schedule:
-    - cron: '0 */6 * * *'  # Run every 6 hours as backup
 
 env:
   REGISTRY: ghcr.io
@@ -115,36 +101,34 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     permissions:
       contents: write
-    # Only run if secrets are available
-    env:
-      SECRETS_READY: ${{ secrets.MANIFESTS_REPO_TOKEN != '' && secrets.ARGOCD_WEBHOOK_URL != '' && secrets.GHCR_TOKEN != '' }}
     
     steps:
-    - name: Verify secrets are available
-      if: env.SECRETS_READY == 'true'
+    - name: Wait for secrets to be available
       run: |
-        echo "✅ All required secrets are available"
-        echo "Repository: ${{ github.repository }}"
-        echo "Event: ${{ github.event_name }}"
-        echo "Ref: ${{ github.ref }}"
-        echo "  - MANIFESTS_REPO_TOKEN: ${#MANIFESTS_REPO_TOKEN} characters"
-        echo "  - ARGOCD_WEBHOOK_URL: ${#ARGOCD_WEBHOOK_URL} characters"
-        echo "  - GHCR_TOKEN: ${#GHCR_TOKEN} characters"
-    
-    - name: Skip deployment - secrets not ready
-      if: env.SECRETS_READY != 'true'
-      run: |
-        echo "⏸️ Skipping deployment - secrets not ready"
-        echo "This workflow will run automatically once secrets are properly set."
-        echo "Please ensure the service was created successfully with all required tokens."
-        echo ""
-        echo "Required secrets:"
-        echo "  - MANIFESTS_REPO_TOKEN: ${{ secrets.MANIFESTS_REPO_TOKEN != '' }}"
-        echo "  - ARGOCD_WEBHOOK_URL: ${{ secrets.ARGOCD_WEBHOOK_URL != '' }}"
-        echo "  - GHCR_TOKEN: ${{ secrets.GHCR_TOKEN != '' }}"
+        echo "Waiting for repository secrets to be set..."
+        sleep 15
+        echo "Checking for MANIFESTS_REPO_TOKEN..."
+        
+        # Retry mechanism for checking secrets with longer wait times
+        for i in {1..10}; do
+          if [ -n "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
+            echo "✅ MANIFESTS_REPO_TOKEN is available (attempt $i)"
+            break
+          else
+            echo "⏳ MANIFESTS_REPO_TOKEN not ready yet (attempt $i/10)"
+            if [ $i -eq 10 ]; then
+              echo "ERROR: MANIFESTS_REPO_TOKEN is required to push to Repo B."
+              echo "Please add it in Settings > Secrets and variables > Actions."
+              echo "This token should have been set automatically when the service was created."
+              echo "If this is a new service, please re-run the service creation process."
+              echo "Alternatively, you can manually re-run this workflow after a few minutes."
+              exit 1
+            fi
+            sleep 10
+          fi
+        done
 
     - name: Checkout manifests repo
-      if: env.SECRETS_READY == 'true'
       uses: actions/checkout@v4
       with:
         repository: ductri09072004/demo_fiss1_B
@@ -152,7 +136,6 @@ jobs:
         path: manifests
         
     - name: Update image tag
-      if: env.SECRETS_READY == 'true'
       run: |
         cd manifests
         SERVICE="${{ github.event.repository.name }}"
@@ -164,7 +147,6 @@ jobs:
         sed -i "s|timestamp: \".*\"|timestamp: \"$TS\"|g" "$FILE"
         
     - name: Commit and push changes
-      if: env.SECRETS_READY == 'true'
       run: |
         cd manifests
         git config --local user.email "action@github.com"
@@ -175,7 +157,6 @@ jobs:
         git push
         
     - name: Trigger ArgoCD Webhook for Immediate Sync
-      if: env.SECRETS_READY == 'true'
       run: |
         SERVICE="${{ github.event.repository.name }}"
         echo "Triggering ArgoCD webhook for immediate sync of $SERVICE..."
