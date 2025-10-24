@@ -27,6 +27,89 @@ def has_git_command():
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
+    """Deploy ArgoCD Application via ArgoCD API instead of kubectl"""
+    try:
+        # Get ArgoCD server URL and token from config
+        from config import ARGOCD_SERVER_URL, ARGOCD_TOKEN
+        argocd_server = ARGOCD_SERVER_URL
+        argocd_token = ARGOCD_TOKEN
+        
+        if not argocd_token:
+            return {'success': False, 'error': 'ARGOCD_TOKEN not configured'}
+        
+        # Prepare application data
+        app_data = {
+            "metadata": {
+                "name": service_name,
+                "namespace": "argocd",
+                "finalizers": ["resources-finalizer.argocd.argoproj.io"]
+            },
+            "spec": {
+                "project": "default",
+                "source": {
+                    "repoURL": repo_b_url.replace('.git', ''),
+                    "targetRevision": "HEAD",
+                    "path": f"services/{service_name}/k8s"
+                },
+                "destination": {
+                    "server": "https://kubernetes.default.svc",
+                    "namespace": namespace
+                },
+                "syncPolicy": {
+                    "automated": {
+                        "prune": True,
+                        "selfHeal": True
+                    },
+                    "syncOptions": [
+                        "CreateNamespace=true",
+                        "PrunePropagationPolicy=foreground",
+                        "PruneLast=true",
+                        "RespectIgnoreDifferences=true",
+                        "ServerSideApply=true"
+                    ],
+                    "retry": {
+                        "backoff": {
+                            "duration": "5s",
+                            "factor": 2,
+                            "maxDuration": "3m"
+                        },
+                        "limit": 5
+                    }
+                }
+            }
+        }
+        
+        # Make API call to ArgoCD
+        headers = {
+            'Authorization': f'Bearer {argocd_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Try to create application
+        create_url = f"{argocd_server}/api/v1/applications"
+        response = requests.post(create_url, json=app_data, headers=headers, timeout=30)
+        
+        if response.status_code in [200, 201]:
+            print(f"✅ ArgoCD Application '{service_name}' created successfully")
+            return {'success': True, 'message': 'Application created via ArgoCD API'}
+        elif response.status_code == 409:
+            # Application already exists, try to update
+            print(f"Application '{service_name}' already exists, updating...")
+            update_url = f"{argocd_server}/api/v1/applications/{service_name}"
+            update_response = requests.put(update_url, json=app_data, headers=headers, timeout=30)
+            
+            if update_response.status_code in [200, 201]:
+                print(f"✅ ArgoCD Application '{service_name}' updated successfully")
+                return {'success': True, 'message': 'Application updated via ArgoCD API'}
+            else:
+                return {'success': False, 'error': f'Update failed: {update_response.status_code} - {update_response.text}'}
+        else:
+            return {'success': False, 'error': f'Create failed: {response.status_code} - {response.text}'}
+            
+    except Exception as e:
+        return {'success': False, 'error': f'ArgoCD API error: {str(e)}'}
+
 def _create_inline_template(template_name, service_name, namespace, port, replicas, min_replicas, max_replicas, cpu_request, cpu_limit, memory_request, memory_limit, gh_owner, repo_name, image_tag):
     """Create inline template content for Railway deployment when local templates are not available"""
     
@@ -542,9 +625,120 @@ def add_prometheus_scrape_job(service_name, service_port):
 def index():
     return render_template('index.html')
 
+@app.route('/argocd')
+@app.route('/argocd/')
+@app.route('/argocd/<path:path>')
+def argocd_proxy(path=''):
+    """Proxy requests to ArgoCD server"""
+    try:
+        from config import ARGOCD_SERVER_URL
+        
+        if not ARGOCD_SERVER_URL or ARGOCD_SERVER_URL == 'https://argocd.your-domain.com':
+            return jsonify({
+                'error': 'ArgoCD not configured',
+                'message': 'Please set ARGOCD_SERVER_URL environment variable'
+            }), 500
+        
+        # Remove trailing slash from base URL
+        base_url = ARGOCD_SERVER_URL.rstrip('/')
+        
+        # Construct target URL
+        if path:
+            target_url = f"{base_url}/{path}"
+        else:
+            target_url = base_url
+            
+        # Add query parameters if present
+        if request.query_string:
+            target_url += f"?{request.query_string.decode()}"
+        
+        print(f"Proxying to ArgoCD: {target_url}")
+        
+        # Forward the request
+        response = requests.request(
+            method=request.method,
+            url=target_url,
+            headers={key: value for (key, value) in request.headers if key != 'Host'},
+            data=request.get_data(),
+            cookies=request.cookies,
+            allow_redirects=False,
+            timeout=30
+        )
+        
+        # Create Flask response
+        flask_response = make_response(response.content)
+        flask_response.status_code = response.status_code
+        
+        # Copy headers
+        for key, value in response.headers.items():
+            if key.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']:
+                flask_response.headers[key] = value
+                
+        return flask_response
+        
+    except Exception as e:
+        print(f"ArgoCD proxy error: {e}")
+        return jsonify({
+            'error': 'ArgoCD proxy failed',
+            'message': str(e)
+        }), 500
+
 @app.route('/dashboard')
 def dashboard():
     return render_template('service_dashboard.html')
+
+@app.route('/argocd-status')
+def argocd_status():
+    """Check ArgoCD connection status"""
+    try:
+        from config import ARGOCD_SERVER_URL, ARGOCD_TOKEN
+        
+        if not ARGOCD_SERVER_URL or ARGOCD_SERVER_URL == 'http://localhost:8080':
+            return jsonify({
+                'status': 'not_configured',
+                'message': 'ArgoCD not configured. Please set ARGOCD_SERVER_URL environment variable.',
+                'url': ARGOCD_SERVER_URL
+            })
+        
+        if not ARGOCD_TOKEN:
+            return jsonify({
+                'status': 'no_token',
+                'message': 'ArgoCD token not configured. Please set ARGOCD_TOKEN environment variable.',
+                'url': ARGOCD_SERVER_URL
+            })
+        
+        # Test connection to ArgoCD
+        try:
+            response = requests.get(f"{ARGOCD_SERVER_URL}/api/v1/version", 
+                                  headers={'Authorization': f'Bearer {ARGOCD_TOKEN}'}, 
+                                  timeout=10)
+            
+            if response.status_code == 200:
+                return jsonify({
+                    'status': 'connected',
+                    'message': 'ArgoCD connection successful',
+                    'url': ARGOCD_SERVER_URL,
+                    'version': response.json().get('Version', 'Unknown')
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'ArgoCD connection failed: {response.status_code}',
+                    'url': ARGOCD_SERVER_URL
+                })
+                
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'status': 'connection_error',
+                'message': f'Cannot connect to ArgoCD: {str(e)}',
+                'url': ARGOCD_SERVER_URL
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Error checking ArgoCD status: {str(e)}'
+        })
 
 # Service Management API Endpoints
 @app.route('/api/services', methods=['GET'])
@@ -2614,9 +2808,17 @@ spec:
             except subprocess.CalledProcessError as e:
                 print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
         else:
-            # On Railway, ArgoCD Application will be deployed manually or via other means
-            print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
-            # Continue anyway - user can apply manually
+            # On Railway, try to deploy via ArgoCD API
+            try:
+                deploy_result = _deploy_argocd_application_via_api(service_name, repo_b_url, namespace)
+                if deploy_result['success']:
+                    print(f"✅ ArgoCD Application '{service_name}' deployed successfully via API")
+                else:
+                    print(f"⚠️ ArgoCD API deploy failed: {deploy_result['error']}")
+                    print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
+            except Exception as e:
+                print(f"⚠️ ArgoCD API deploy error: {e}")
+                print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
         
         print(f"Service '{service_name}' created with YAML manifests in Repo B")
         
@@ -2733,7 +2935,7 @@ spec:
                     # ArgoCD has synced, safe to delete YAML files
                     print(f"ArgoCD synced successfully for {service_name}, deleting YAML files...")
                     
-                    try:
+                        try:
                         # Delete YAML files from Repo B
                         yaml_files_to_delete = [
                             'deployment.yaml',
@@ -2752,95 +2954,96 @@ spec:
                             print(f"Using GitHub API to delete YAML files for {service_name}")
                             # Use GitHub API to delete files
                             _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete)
+                            return  # Exit early for Railway environment
                         else:
                             # Use git commands for local development
                             temp_dir = tempfile.gettempdir()
                             clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
-                        
-                        # Remove existing directory if it exists
-                        if os.path.exists(clone_dir):
-                            shutil.rmtree(clone_dir)
-                        
-                        print(f"Cloning repository to: {clone_dir}")
-                        clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                  capture_output=True, text=True, timeout=60)
-                        
-                        if clone_proc.returncode != 0:
-                            print(f"Failed to clone repository: {clone_proc.stderr}")
-                            return
-                        
-                        # Check if service directory exists
-                        service_path = f"services/{service_name}/k8s"
-                        full_service_path = os.path.join(clone_dir, service_path)
-                        
-                        if not os.path.exists(full_service_path):
-                            print(f"Service directory not found: {service_path}")
-                            return
-                        
-                        # Delete each YAML file
-                        deleted_files = []
-                        for yaml_file in yaml_files_to_delete:
-                            file_path = os.path.join(full_service_path, yaml_file)
-                            if os.path.exists(file_path):
-                                os.remove(file_path)
-                                deleted_files.append(yaml_file)
-                                print(f"Deleted {yaml_file}")
-                        
-                        # Also delete the ArgoCD Application file under apps/
-                        apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                        if os.path.exists(apps_file):
-                            os.remove(apps_file)
-                            deleted_files.append(f'apps/{service_name}-application.yaml')
-                            print(f"Deleted apps/{service_name}-application.yaml")
-                        
-                        if not deleted_files:
-                            print("No YAML files found to delete")
-                            return
-                        
-                        # Remove empty directories
-                        remaining_files = os.listdir(full_service_path)
-                        if not remaining_files:
-                            os.rmdir(full_service_path)
-                            print(f"Deleted empty k8s directory")
-                        
-                        # Check if services directory is empty
-                        service_dir = os.path.join(clone_dir, 'services', service_name)
-                        if os.path.exists(service_dir) and not os.listdir(service_dir):
-                            os.rmdir(service_dir)
-                            print(f"Deleted empty service directory")
-                        
-                        # Commit and push deletion
-                        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-                        
-                        # Check if there are changes
-                        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-                        if st.stdout.strip():
-                            commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
-                                                       cwd=clone_dir, capture_output=True, text=True)
                             
-                            if commit_proc.returncode == 0:
-                                push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
-                                                        cwd=clone_dir, capture_output=True, text=True)
+                            # Remove existing directory if it exists
+                            if os.path.exists(clone_dir):
+                                shutil.rmtree(clone_dir)
+                            
+                            print(f"Cloning repository to: {clone_dir}")
+                            clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                      capture_output=True, text=True, timeout=60)
+                            
+                            if clone_proc.returncode != 0:
+                                print(f"Failed to clone repository: {clone_proc.stderr}")
+                                return
+                            
+                            # Check if service directory exists
+                            service_path = f"services/{service_name}/k8s"
+                            full_service_path = os.path.join(clone_dir, service_path)
+                            
+                            if not os.path.exists(full_service_path):
+                                print(f"Service directory not found: {service_path}")
+                                return
+                            
+                            # Delete each YAML file
+                            deleted_files = []
+                            for yaml_file in yaml_files_to_delete:
+                                file_path = os.path.join(full_service_path, yaml_file)
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                                    deleted_files.append(yaml_file)
+                                    print(f"Deleted {yaml_file}")
+                            
+                            # Also delete the ArgoCD Application file under apps/
+                            apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                            if os.path.exists(apps_file):
+                                os.remove(apps_file)
+                                deleted_files.append(f'apps/{service_name}-application.yaml')
+                                print(f"Deleted apps/{service_name}-application.yaml")
+                            
+                            if not deleted_files:
+                                print("No YAML files found to delete")
+                                return
+                            
+                            # Remove empty directories
+                            remaining_files = os.listdir(full_service_path)
+                            if not remaining_files:
+                                os.rmdir(full_service_path)
+                                print(f"Deleted empty k8s directory")
+                            
+                            # Check if services directory is empty
+                            service_dir = os.path.join(clone_dir, 'services', service_name)
+                            if os.path.exists(service_dir) and not os.listdir(service_dir):
+                                os.rmdir(service_dir)
+                                print(f"Deleted empty service directory")
+                            
+                            # Commit and push deletion
+                            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+                            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+                            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+                            
+                            # Check if there are changes
+                            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+                            if st.stdout.strip():
+                                commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
+                                                           cwd=clone_dir, capture_output=True, text=True)
                                 
-                                if push_proc.returncode == 0:
-                                    print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
+                                if commit_proc.returncode == 0:
+                                    push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
+                                                            cwd=clone_dir, capture_output=True, text=True)
+                                    
+                                    if push_proc.returncode == 0:
+                                        print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
+                                    else:
+                                        print(f"❌ Failed to push changes: {push_proc.stderr}")
                                 else:
-                                    print(f"❌ Failed to push changes: {push_proc.stderr}")
+                                    print(f"❌ Failed to commit changes: {commit_proc.stderr}")
                             else:
-                                print(f"❌ Failed to commit changes: {commit_proc.stderr}")
-                        else:
-                            print("No changes to commit")
-                        
-                        # Cleanup temp directory
-                        shutil.rmtree(clone_dir)
-                        print(f"Cleaned up temp directory")
-                        
-                    except Exception as cleanup_error:
-                        print(f"❌ Error during YAML cleanup: {cleanup_error}")
-                        import traceback
-                        traceback.print_exc()
+                                print("No changes to commit")
+                            
+                            # Cleanup temp directory
+                            shutil.rmtree(clone_dir)
+                            print(f"Cleaned up temp directory")
+                            
+                        except Exception as cleanup_error:
+                            print(f"❌ Error during YAML cleanup: {cleanup_error}")
+                            import traceback
+                            traceback.print_exc()
                 else:
                     print(f"ArgoCD sync not completed for {service_name}, keeping YAML files")
                     
