@@ -13,7 +13,7 @@ MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
 ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://auto-tool.up.railway.app/api/webhook')
 
 # ArgoCD API Configuration
-ARGOCD_SERVER_URL = os.getenv('ARGOCD_SERVER_URL', 'http://localhost:8080')
+ARGOCD_SERVER_URL = os.getenv('ARGOCD_SERVER_URL', 'http://argocd:8080')
 ARGOCD_TOKEN = os.getenv('ARGOCD_TOKEN', '')
 
 # Debug logging for tokens

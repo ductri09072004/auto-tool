@@ -632,11 +632,15 @@ def argocd_proxy(path=''):
     """Proxy requests to ArgoCD server"""
     try:
         from config import ARGOCD_SERVER_URL
+        print(f"DEBUG: ArgoCD proxy called with path='{path}'")
+        print(f"DEBUG: ARGOCD_SERVER_URL = {ARGOCD_SERVER_URL}")
         
-        if not ARGOCD_SERVER_URL or ARGOCD_SERVER_URL == 'https://argocd.your-domain.com':
+        if not ARGOCD_SERVER_URL or ARGOCD_SERVER_URL == 'https://argocd.your-domain.com' or ARGOCD_SERVER_URL == 'http://localhost:8080':
             return jsonify({
                 'error': 'ArgoCD not configured',
-                'message': 'Please set ARGOCD_SERVER_URL environment variable'
+                'message': 'Please set ARGOCD_SERVER_URL environment variable to your ArgoCD server URL',
+                'current_url': ARGOCD_SERVER_URL,
+                'instructions': 'Set ARGOCD_SERVER_URL to your ArgoCD server URL (e.g., https://your-argocd-server.com)'
             }), 500
         
         # Remove trailing slash from base URL

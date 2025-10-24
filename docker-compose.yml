@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  dev-portal:
+    build: .
+    ports:
+      - "3050:3050"
+    environment:
+      - FLASK_ENV=production
+      - ARGOCD_SERVER_URL=http://argocd:8080
+    depends_on:
+      - argocd
+    networks:
+      - dev-portal-network
+
+  argocd:
+    build:
+      context: .
+      dockerfile: argocd.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ARGOCD_SERVER_INSECURE=true
+      - ARGOCD_SERVER_ROOT_PATH=/
+    networks:
+      - dev-portal-network
+
+networks:
+  dev-portal-network:
+    driver: bridge
