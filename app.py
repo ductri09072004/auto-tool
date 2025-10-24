@@ -1447,26 +1447,13 @@ def create_service():
         repo_b_path = request.form.get('repo_b_path', '').strip()
         image_tag_mode = request.form.get('image_tag_mode', 'latest').strip()
         
-        # Debug: Check tokens from form
-        print(f"DEBUG: Form tokens received:")
-        print(f"  - github_token: {'SET' if github_token else 'NOT SET'} ({len(github_token)} chars)")
-        print(f"  - manifests_token: {'SET' if manifests_token else 'NOT SET'} ({len(manifests_token)} chars)")
-        print(f"  - service_name: {service_name}")
-        print(f"  - repo_url: {repo_url}")
-        
-        # Fallback to global tokens if form tokens are empty
+        # Validate GitHub token
         if not github_token:
-            github_token = GITHUB_TOKEN
-            print(f"Using global GITHUB_TOKEN: {'SET' if github_token else 'NOT SET'}")
-        if not manifests_token:
-            manifests_token = MANIFESTS_REPO_TOKEN
-            print(f"Using global MANIFESTS_REPO_TOKEN: {'SET' if manifests_token else 'NOT SET'}")
+            return jsonify({'error': 'GitHub token is required'}), 400
         
-        # Final validation
-        if not github_token:
-            return jsonify({'error': 'GitHub token is required (not provided in form or global config)'}), 400
+        # Validate manifests token
         if not manifests_token:
-            return jsonify({'error': 'Manifests token is required (not provided in form or global config)'}), 400
+            return jsonify({'error': 'Manifests repository token is required'}), 400
         
         # Test GitHub token validity
         try:
@@ -1648,11 +1635,8 @@ def create_service():
             
             print(f"DEBUG: About to call ensure_repo_secrets with:")
             print(f"  - repo_url: {repo_url}")
-            print(f"  - github_token: {'SET' if github_token else 'NOT SET'} ({len(github_token)} chars)")
-            print(f"  - manifests_token: {'SET' if manifests_token else 'NOT SET'} ({len(manifests_token)} chars)")
-            print(f"  - Final token values:")
-            print(f"    * github_token: {github_token[:10]}..." if github_token else "    * github_token: EMPTY")
-            print(f"    * manifests_token: {manifests_token[:10]}..." if manifests_token else "    * manifests_token: EMPTY")
+            print(f"  - github_token: {'SET' if github_token else 'NOT SET'}")
+            print(f"  - manifests_token: {'SET' if manifests_token else 'NOT SET'}")
             
             secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
             print(f"Secrets result: {secrets_result}")
