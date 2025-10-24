@@ -608,27 +608,38 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             if not value:
                 print(f"WARNING: {name} is empty, skipping...")
                 continue
-            try:
-                encrypted_value = _encrypt_secret(repo_public_key, value)
-                put_resp = requests.put(
-                    f"{base}/{name}",
-                    headers={**headers, 'Content-Type': 'application/json'},
-                    json={'encrypted_value': encrypted_value, 'key_id': key_id}
-                )
-                if put_resp.status_code not in [201, 204]:
-                    print(f"ERROR: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
-                    print(f"INFO: This will cause GitHub Actions to fail!")
-                    # For critical secrets, this is critical
-                    if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
-                        print(f"CRITICAL: {name} is required for GitHub Actions to work!")
-                        return False
-                else:
-                    print(f"SUCCESS: Successfully set secret {name}")
-            except Exception as e:
-                print(f"ERROR: Exception while setting secret {name}: {e}")
-                if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
-                    print(f"CRITICAL: Failed to set {name} - GitHub Actions will fail!")
-                    return False
+            # Retry logic for setting secrets
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    encrypted_value = _encrypt_secret(repo_public_key, value)
+                    put_resp = requests.put(
+                        f"{base}/{name}",
+                        headers={**headers, 'Content-Type': 'application/json'},
+                        json={'encrypted_value': encrypted_value, 'key_id': key_id}
+                    )
+                    if put_resp.status_code in [201, 204]:
+                        print(f"SUCCESS: Successfully set secret {name}")
+                        break
+                    else:
+                        print(f"ERROR: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
+                        if attempt < max_retries - 1:
+                            print(f"Retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})")
+                            time.sleep(5)
+                        else:
+                            print(f"CRITICAL: Failed to set {name} after {max_retries} attempts!")
+                            if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
+                                print(f"CRITICAL: {name} is required for GitHub Actions to work!")
+                                return False
+                except Exception as e:
+                    print(f"ERROR: Exception while setting secret {name}: {e}")
+                    if attempt < max_retries - 1:
+                        print(f"Retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(5)
+                    else:
+                        if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
+                            print(f"CRITICAL: {name} is required for GitHub Actions to work!")
+                            return False
         print("✅ All secrets set successfully")
         return True
     except Exception as e:
@@ -1543,10 +1554,10 @@ def create_service():
                     'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
                 }), 400
             
-            # Wait a bit to ensure secrets are propagated
+            # Wait longer to ensure secrets are propagated
             print("Waiting for secrets to be propagated...")
             import time
-            time.sleep(5)
+            time.sleep(15)  # Increased from 5 to 15 seconds
             print("✅ Repository secrets set successfully")
             
         except Exception as e:
