@@ -3046,17 +3046,44 @@ spec:
                 
                 # Final comprehensive check before proceeding
                 if is_railway_environment():
-                    # On Railway, check ArgoCD status via API
+                    # On Railway, check ArgoCD status via API with retry logic
                     print(f"Railway environment: Checking ArgoCD status via API for {service_name}")
-                    argocd_status = _check_argocd_application_status(service_name)
-                    if argocd_status and argocd_status['synced']:
-                        print(f"✅ ArgoCD application {service_name} is synced via API")
-                        argocd_final = True
-                        pods_final = True
-                    else:
-                        print(f"⚠️ ArgoCD application {service_name} not synced yet, proceeding anyway")
-                        argocd_final = True  # Proceed anyway on Railway
-                        pods_final = True
+                    
+                    # Retry logic for ArgoCD health check
+                    max_health_retries = 5
+                    health_retry_delay = 30  # 30 seconds between retries
+                    
+                    for health_attempt in range(max_health_retries):
+                        argocd_status = _check_argocd_application_status(service_name)
+                        if argocd_status:
+                            sync_status = argocd_status.get('sync_status', 'Unknown')
+                            health_status = argocd_status.get('health_status', 'Unknown')
+                            print(f"ArgoCD status (attempt {health_attempt + 1}/{max_health_retries}): sync={sync_status}, health={health_status}")
+                            
+                            # Only proceed if both sync and health are ready
+                            if sync_status == 'Synced' and health_status in ['Healthy', 'Progressing']:
+                                print(f"✅ ArgoCD application {service_name} is ready (sync={sync_status}, health={health_status})")
+                                argocd_final = True
+                                pods_final = True
+                                break
+                            else:
+                                if health_attempt < max_health_retries - 1:
+                                    print(f"⚠️ ArgoCD application {service_name} not ready yet (sync={sync_status}, health={health_status})")
+                                    print(f"⏳ Waiting {health_retry_delay}s before retry...")
+                                    time.sleep(health_retry_delay)
+                                else:
+                                    print(f"⚠️ ArgoCD application {service_name} still not ready after {max_health_retries} attempts")
+                                    print(f"⏳ Proceeding anyway to avoid infinite wait...")
+                                    argocd_final = True  # Proceed anyway to avoid infinite wait
+                                    pods_final = True
+                        else:
+                            if health_attempt < max_health_retries - 1:
+                                print(f"⚠️ Could not get ArgoCD status for {service_name}, retrying...")
+                                time.sleep(health_retry_delay)
+                            else:
+                                print(f"⚠️ Could not get ArgoCD status for {service_name} after {max_health_retries} attempts, proceeding anyway")
+                                argocd_final = True  # Proceed anyway on Railway
+                                pods_final = True
                 else:
                     final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
                                                        capture_output=True, text=True)
