@@ -3059,14 +3059,30 @@ spec:
                             sync_status = argocd_status.get('sync_status', 'Unknown')
                             health_status = argocd_status.get('health_status', 'Unknown')
                             print(f"ArgoCD status (attempt {health_attempt + 1}/{max_health_retries}): sync={sync_status}, health={health_status}")
+                            print(f"  - Sync Status: {sync_status} ({'✅' if sync_status == 'Synced' else '❌'})")
+                            print(f"  - Health Status: {health_status} ({'✅' if health_status == 'Healthy' else '⏳' if health_status == 'Progressing' else '❌'})")
                             
                             # Only proceed if both sync and health are ready
-                            if sync_status == 'Synced' and health_status in ['Healthy', 'Progressing']:
+                            # Progressing means still deploying, not ready yet
+                            if sync_status == 'Synced' and health_status == 'Healthy':
                                 print(f"✅ ArgoCD application {service_name} is ready (sync={sync_status}, health={health_status})")
                                 argocd_final = True
                                 pods_final = True
                                 break
+                            elif sync_status == 'Synced' and health_status == 'Progressing':
+                                print(f"⏳ ArgoCD application {service_name} is still deploying (sync={sync_status}, health={health_status})")
+                                print(f"⏳ Waiting for deployment to complete...")
+                                if health_attempt < max_health_retries - 1:
+                                    print(f"⏳ Waiting {health_retry_delay}s before retry...")
+                                    time.sleep(health_retry_delay)
+                                else:
+                                    print(f"⚠️ ArgoCD application {service_name} still deploying after {max_health_retries} attempts")
+                                    print(f"⏳ Proceeding anyway to avoid infinite wait...")
+                                    argocd_final = True  # Proceed anyway to avoid infinite wait
+                                    pods_final = True
+                                    break
                             else:
+                                # Other statuses (Unknown, Degraded, etc.)
                                 if health_attempt < max_health_retries - 1:
                                     print(f"⚠️ ArgoCD application {service_name} not ready yet (sync={sync_status}, health={health_status})")
                                     print(f"⏳ Waiting {health_retry_delay}s before retry...")
