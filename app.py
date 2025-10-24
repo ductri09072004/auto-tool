@@ -2614,16 +2614,16 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         
         # List of YAML files to create
         yaml_files = [
-            'deployment.yaml',
-            'service.yaml', 
-            'configmap.yaml',
-            'hpa.yaml',
-            'ingress.yaml',
-            'ingress-gateway.yaml',
-            'namespace.yaml',
-            'secret.yaml'
-        ]
-        
+                'deployment.yaml',
+                'service.yaml', 
+                'configmap.yaml',
+                'hpa.yaml',
+                'ingress.yaml',
+                'ingress-gateway.yaml',
+                'namespace.yaml',
+                'secret.yaml'
+            ]
+            
         # Check if we have local templates or need to use inline templates
         use_local_templates = os.path.exists(k8s_template_dir)
         if not use_local_templates:
@@ -2931,9 +2931,9 @@ spec:
                                                        capture_output=True, text=True)
                     final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
                                                      capture_output=True, text=True)
-                    
-                    argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
-                    pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
+                
+                argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
+                pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
                 
                 if argocd_final and pods_final:
                     # ArgoCD has synced, safe to delete YAML files
@@ -2963,87 +2963,87 @@ spec:
                             # Use git commands for local development
                             temp_dir = tempfile.gettempdir()
                             clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
-                            
-                            # Remove existing directory if it exists
-                            if os.path.exists(clone_dir):
-                                shutil.rmtree(clone_dir)
-                            
-                            print(f"Cloning repository to: {clone_dir}")
-                            clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                      capture_output=True, text=True, timeout=60)
-                            
-                            if clone_proc.returncode != 0:
-                                print(f"Failed to clone repository: {clone_proc.stderr}")
-                                return
-                            
-                            # Check if service directory exists
-                            service_path = f"services/{service_name}/k8s"
-                            full_service_path = os.path.join(clone_dir, service_path)
-                            
-                            if not os.path.exists(full_service_path):
-                                print(f"Service directory not found: {service_path}")
-                                return
-                            
-                            # Delete each YAML file
-                            deleted_files = []
-                            for yaml_file in yaml_files_to_delete:
-                                file_path = os.path.join(full_service_path, yaml_file)
-                                if os.path.exists(file_path):
-                                    os.remove(file_path)
-                                    deleted_files.append(yaml_file)
-                                    print(f"Deleted {yaml_file}")
-                            
-                            # Also delete the ArgoCD Application file under apps/
-                            apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                            if os.path.exists(apps_file):
-                                os.remove(apps_file)
-                                deleted_files.append(f'apps/{service_name}-application.yaml')
-                                print(f"Deleted apps/{service_name}-application.yaml")
-                            
-                            if not deleted_files:
-                                print("No YAML files found to delete")
-                                return
-                            
-                            # Remove empty directories
-                            remaining_files = os.listdir(full_service_path)
-                            if not remaining_files:
-                                os.rmdir(full_service_path)
-                                print(f"Deleted empty k8s directory")
-                            
-                            # Check if services directory is empty
-                            service_dir = os.path.join(clone_dir, 'services', service_name)
-                            if os.path.exists(service_dir) and not os.listdir(service_dir):
-                                os.rmdir(service_dir)
-                                print(f"Deleted empty service directory")
-                            
-                            # Commit and push deletion
-                            subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-                            subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-                            subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-                            
-                            # Check if there are changes
-                            st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-                            if st.stdout.strip():
-                                commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
-                                                           cwd=clone_dir, capture_output=True, text=True)
-                                
-                                if commit_proc.returncode == 0:
-                                    push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
-                                                            cwd=clone_dir, capture_output=True, text=True)
-                                    
-                                    if push_proc.returncode == 0:
-                                        print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
-                                    else:
-                                        print(f"❌ Failed to push changes: {push_proc.stderr}")
-                                else:
-                                    print(f"❌ Failed to commit changes: {commit_proc.stderr}")
-                            else:
-                                print("No changes to commit")
-                            
-                            # Cleanup temp directory
+                        
+                        # Remove existing directory if it exists
+                        if os.path.exists(clone_dir):
                             shutil.rmtree(clone_dir)
-                            print(f"Cleaned up temp directory")
+                        
+                        print(f"Cloning repository to: {clone_dir}")
+                        clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
+                                                  capture_output=True, text=True, timeout=60)
+                        
+                        if clone_proc.returncode != 0:
+                            print(f"Failed to clone repository: {clone_proc.stderr}")
+                            return
+                        
+                        # Check if service directory exists
+                        service_path = f"services/{service_name}/k8s"
+                        full_service_path = os.path.join(clone_dir, service_path)
+                        
+                        if not os.path.exists(full_service_path):
+                            print(f"Service directory not found: {service_path}")
+                            return
+                        
+                        # Delete each YAML file
+                        deleted_files = []
+                        for yaml_file in yaml_files_to_delete:
+                            file_path = os.path.join(full_service_path, yaml_file)
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                deleted_files.append(yaml_file)
+                                print(f"Deleted {yaml_file}")
+                        
+                        # Also delete the ArgoCD Application file under apps/
+                        apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
+                        if os.path.exists(apps_file):
+                            os.remove(apps_file)
+                            deleted_files.append(f'apps/{service_name}-application.yaml')
+                            print(f"Deleted apps/{service_name}-application.yaml")
+                        
+                        if not deleted_files:
+                            print("No YAML files found to delete")
+                            return
+                        
+                        # Remove empty directories
+                        remaining_files = os.listdir(full_service_path)
+                        if not remaining_files:
+                            os.rmdir(full_service_path)
+                            print(f"Deleted empty k8s directory")
+                        
+                        # Check if services directory is empty
+                        service_dir = os.path.join(clone_dir, 'services', service_name)
+                        if os.path.exists(service_dir) and not os.listdir(service_dir):
+                            os.rmdir(service_dir)
+                            print(f"Deleted empty service directory")
+                        
+                        # Commit and push deletion
+                        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
+                        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
+                        
+                        # Check if there are changes
+                        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
+                        if st.stdout.strip():
+                            commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
+                                                       cwd=clone_dir, capture_output=True, text=True)
                             
+                            if commit_proc.returncode == 0:
+                                push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
+                                                        cwd=clone_dir, capture_output=True, text=True)
+                                
+                                if push_proc.returncode == 0:
+                                    print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
+                                else:
+                                    print(f"❌ Failed to push changes: {push_proc.stderr}")
+                            else:
+                                print(f"❌ Failed to commit changes: {commit_proc.stderr}")
+                        else:
+                            print("No changes to commit")
+                        
+                        # Cleanup temp directory
+                        shutil.rmtree(clone_dir)
+                        print(f"Cleaned up temp directory")
+                        
                     except Exception as cleanup_error:
                         print(f"❌ Error during YAML cleanup: {cleanup_error}")
                         import traceback
