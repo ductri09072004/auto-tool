@@ -239,13 +239,7 @@ jobs:
         git commit -m "Update $SERVICE image to ${{ github.sha }}" || exit 0
         git push
         
-    - name: Install ArgoCD CLI
-      run: |
-        echo "Installing ArgoCD CLI..."
-        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-        chmod +x /usr/local/bin/argocd
-        
-    - name: Deploy ArgoCD Application
+    - name: Deploy ArgoCD Application via API
       run: |
         SERVICE="${{ github.event.repository.name }}"
         ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
@@ -256,12 +250,77 @@ jobs:
           exit 0
         fi
         
-        echo "Logging in to ArgoCD..."
-        argocd login $ARGOCD_SERVER --username admin --password "$ARGOCD_PASSWORD" --insecure --grpc-web
+        echo "Getting ArgoCD session token..."
+        # Login to ArgoCD and get session token
+        SESSION_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/session" \
+          -H "Content-Type: application/json" \
+          -H "ngrok-skip-browser-warning: true" \
+          -d "{\"username\":\"admin\",\"password\":\"$ARGOCD_PASSWORD\"}" \
+          -k \
+          -c /tmp/argocd-cookies.txt)
         
-        echo "Deploying ArgoCD Application for $SERVICE..."
-        argocd app create -f apps/${SERVICE}-application.yaml || argocd app sync $SERVICE
-        echo "✅ ArgoCD Application deployed"
+        if echo "$SESSION_RESP" | grep -q "token"; then
+          echo "✅ ArgoCD session created"
+          
+          # Read ArgoCD Application YAML
+          APP_CONTENT=$(cat <<'EOF'
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: __SERVICE_NAME__
+          namespace: argocd
+          finalizers:
+            - resources-finalizer.argocd.argoproj.io
+        spec:
+          project: default
+          source:
+            repoURL: https://github.com/ductri09072004/demo_fiss1_B
+            targetRevision: HEAD
+            path: services/__SERVICE_NAME__/k8s
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: __SERVICE_NAME__
+          syncPolicy:
+            automated:
+              prune: true
+              selfHeal: true
+            syncOptions:
+            - CreateNamespace=true
+            - PrunePropagationPolicy=foreground
+            - PruneLast=true
+            - RespectIgnoreDifferences=true
+            - ServerSideApply=true
+            retry:
+              backoff:
+                duration: 5s
+                factor: 2
+                maxDuration: 3m
+              limit: 5
+          revisionHistoryLimit: 3
+        EOF
+          )
+          
+          # Replace service name
+          APP_CONTENT=$(echo "$APP_CONTENT" | sed "s/__SERVICE_NAME__/$SERVICE/g")
+          
+          # Create ArgoCD Application
+          echo "Creating ArgoCD Application for $SERVICE..."
+          CREATE_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/applications" \
+            -H "Content-Type: application/json" \
+            -H "ngrok-skip-browser-warning: true" \
+            -b /tmp/argocd-cookies.txt \
+            -d "$APP_CONTENT" \
+            -k)
+          
+          if echo "$CREATE_RESP" | grep -q "createdAt\|alreadyExists"; then
+            echo "✅ ArgoCD Application deployed successfully"
+          else
+            echo "⚠️ Application may already exist or error occurred"
+            echo "Response: $CREATE_RESP"
+          fi
+        else
+          echo "⚠️ Failed to get ArgoCD session: $SESSION_RESP"
+        fi
         
     - name: Trigger ArgoCD Webhook for Immediate Sync
       run: |
