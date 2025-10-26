@@ -387,5 +387,91 @@ jobs:
         else
           echo "⚠️ Failed to login to ArgoCD - sync will happen automatically"
         fi
+        
+    - name: Wait for ArgoCD Healthy and Cleanup YAML
+      run: |
+        SERVICE="${{ github.event.repository.name }}"
+        ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
+        ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
+        
+        if [ -z "$ARGOCD_SERVER" ] || [ -z "$ARGOCD_PASSWORD" ]; then
+          echo "⚠️ ArgoCD credentials not configured - skipping cleanup"
+          exit 0
+        fi
+        
+        echo "⏳ Waiting for ArgoCD application to be healthy..."
+        
+        # Wait for ArgoCD to be healthy (max 5 minutes)
+        for i in {1..30}; do
+          echo "🔍 Checking ArgoCD status (attempt $i/30)..."
+          
+          # Login to ArgoCD
+          SESSION_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/session" \
+            -H "Content-Type: application/json" \
+            -H "ngrok-skip-browser-warning: true" \
+            -d "{\"username\":\"admin\",\"password\":\"$ARGOCD_PASSWORD\"}" \
+            -k \
+            -c /tmp/argocd-cleanup-cookies.txt)
+          
+          if echo "$SESSION_RESP" | grep -q "token"; then
+            # Check application status
+            STATUS_RESP=$(curl -s -X GET "$ARGOCD_SERVER/api/v1/applications/$SERVICE" \
+              -H "ngrok-skip-browser-warning: true" \
+              -b /tmp/argocd-cleanup-cookies.txt \
+              -k)
+            
+            if echo "$STATUS_RESP" | grep -q '"health":{"status":"Healthy"'; then
+              echo "✅ ArgoCD application $SERVICE is healthy!"
+              
+              # Cleanup YAML files from Repo B
+              echo "🧹 Cleaning up YAML files from Repo B..."
+              cd manifests
+              
+              # Files to delete
+              YAML_FILES=(
+                "services/$SERVICE/k8s/deployment.yaml"
+                "services/$SERVICE/k8s/service.yaml"
+                "services/$SERVICE/k8s/configmap.yaml"
+                "services/$SERVICE/k8s/hpa.yaml"
+                "services/$SERVICE/k8s/ingress.yaml"
+                "services/$SERVICE/k8s/ingress-gateway.yaml"
+                "services/$SERVICE/k8s/namespace.yaml"
+                "services/$SERVICE/k8s/secret.yaml"
+                "apps/$SERVICE-application.yaml"
+              )
+              
+              # Delete files that exist
+              for file in "${YAML_FILES[@]}"; do
+                if [ -f "$file" ]; then
+                  echo "🗑️ Deleting $file"
+                  git rm "$file" 2>/dev/null || rm -f "$file"
+                fi
+              done
+              
+              # Commit and push cleanup
+              git config --local user.email "action@github.com"
+              git config --local user.name "GitHub Action"
+              git add -A
+              if git diff --staged --quiet; then
+                echo "ℹ️ No changes to commit"
+              else
+                git commit -m "Cleanup YAML files after ArgoCD deployment - $SERVICE" || exit 0
+                git push
+                echo "✅ YAML files cleaned up successfully"
+              fi
+              
+              exit 0
+            else
+              echo "⏳ ArgoCD still deploying... (attempt $i/30)"
+            fi
+          else
+            echo "⚠️ Failed to login to ArgoCD (attempt $i/30)"
+          fi
+          
+          sleep 10
+        done
+        
+        echo "⚠️ ArgoCD did not reach healthy status within 5 minutes"
+        echo "💡 Check ArgoCD UI at $ARGOCD_SERVER for detailed status"
 
 
