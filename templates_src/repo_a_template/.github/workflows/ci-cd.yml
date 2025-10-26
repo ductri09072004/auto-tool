@@ -267,46 +267,51 @@ jobs:
         if echo "$SESSION_RESP" | grep -q "token"; then
           echo "✅ ArgoCD session created"
           
-          # Read ArgoCD Application YAML
-          APP_CONTENT=$(cat <<'EOF'
-        apiVersion: argoproj.io/v1alpha1
-        kind: Application
-        metadata:
-          name: __SERVICE_NAME__
-          namespace: argocd
-          finalizers:
-            - resources-finalizer.argocd.argoproj.io
-        spec:
-          project: default
-          source:
-            repoURL: https://github.com/ductri09072004/demo_fiss1_B
-            targetRevision: HEAD
-            path: services/__SERVICE_NAME__/k8s
-          destination:
-            server: https://kubernetes.default.svc
-            namespace: __SERVICE_NAME__
-          syncPolicy:
-            automated:
-              prune: true
-              selfHeal: true
-            syncOptions:
-            - CreateNamespace=true
-            - PrunePropagationPolicy=foreground
-            - PruneLast=true
-            - RespectIgnoreDifferences=true
-            - ServerSideApply=true
-            retry:
-              backoff:
-                duration: 5s
-                factor: 2
-                maxDuration: 3m
-              limit: 5
-          revisionHistoryLimit: 3
+          # Create ArgoCD Application JSON directly
+          APP_CONTENT=$(cat <<EOF
+        {
+          "metadata": {
+            "name": "$SERVICE",
+            "namespace": "argocd",
+            "finalizers": ["resources-finalizer.argocd.argoproj.io"]
+          },
+          "spec": {
+            "project": "default",
+            "source": {
+              "repoURL": "https://github.com/ductri09072004/demo_fiss1_B",
+              "targetRevision": "HEAD",
+              "path": "services/$SERVICE/k8s"
+            },
+            "destination": {
+              "server": "https://kubernetes.default.svc",
+              "namespace": "$SERVICE"
+            },
+            "syncPolicy": {
+              "automated": {
+                "prune": true,
+                "selfHeal": true
+              },
+              "syncOptions": [
+                "CreateNamespace=true",
+                "PrunePropagationPolicy=foreground",
+                "PruneLast=true",
+                "RespectIgnoreDifferences=true",
+                "ServerSideApply=true"
+              ],
+              "retry": {
+                "backoff": {
+                  "duration": "5s",
+                  "factor": 2,
+                  "maxDuration": "3m"
+                },
+                "limit": 5
+              }
+            },
+            "revisionHistoryLimit": 3
+          }
+        }
         EOF
           )
-          
-          # Replace service name
-          APP_CONTENT=$(echo "$APP_CONTENT" | sed "s/__SERVICE_NAME__/$SERVICE/g")
           
           # Create ArgoCD Application
           echo "Creating ArgoCD Application for $SERVICE..."
@@ -352,18 +357,32 @@ jobs:
         if echo "$SESSION_RESP" | grep -q "token"; then
           echo "✅ Logged in to ArgoCD"
           
-          # Trigger sync via API
-          SYNC_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/applications/$SERVICE/sync" \
-            -H "Content-Type: application/json" \
+          # Check if application exists first
+          echo "🔍 Checking if application $SERVICE exists..."
+          APP_CHECK=$(curl -s -X GET "$ARGOCD_SERVER/api/v1/applications/$SERVICE" \
             -H "ngrok-skip-browser-warning: true" \
             -b /tmp/argocd-sync-cookies.txt \
-            -d '{"revision":"HEAD","prune":true,"dryRun":false}' \
             -k)
           
-          if echo "$SYNC_RESP" | grep -q "operationState"; then
-            echo "✅ ArgoCD sync triggered successfully!"
+          if echo "$APP_CHECK" | grep -q '"name":"'$SERVICE'"'; then
+            echo "✅ Application $SERVICE exists, triggering sync..."
+            
+            # Trigger sync via API
+            SYNC_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/applications/$SERVICE/sync" \
+              -H "Content-Type: application/json" \
+              -H "ngrok-skip-browser-warning: true" \
+              -b /tmp/argocd-sync-cookies.txt \
+              -d '{"revision":"HEAD","prune":true,"dryRun":false}' \
+              -k)
+            
+            if echo "$SYNC_RESP" | grep -q "operationState"; then
+              echo "✅ ArgoCD sync triggered successfully!"
+            else
+              echo "⚠️ Sync trigger response: $SYNC_RESP"
+            fi
           else
-            echo "⚠️ Sync trigger response: $SYNC_RESP"
+            echo "⚠️ Application $SERVICE not found, sync will happen automatically when created"
+            echo "Response: $APP_CHECK"
           fi
         else
           echo "⚠️ Failed to login to ArgoCD - sync will happen automatically"
