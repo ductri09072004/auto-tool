@@ -1574,6 +1574,22 @@ def create_service():
             print(f"⚠️ Warning: Failed to create webhook for {service_name}: {webhook_result.get('error')}")
             # Continue with service creation even if webhook fails
 
+        # Ensure secrets exist BEFORE adding CI/CD (to avoid race condition)
+        try:
+            print("Setting repository secrets BEFORE adding CI/CD...")
+            print(f"Repository URL: {repo_url}")
+            print(f"GitHub token: {'SET' if github_token else 'NOT SET'}")
+            print(f"Manifests token: {'SET' if manifests_token else 'NOT SET'}")
+            secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
+            print(f"Secrets result: {secrets_result}")
+            if not secrets_result:
+                print("⚠️ Warning: Failed to set repository secrets. CI/CD may fail on first run.")
+            else:
+                print("✅ Repository secrets set successfully")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not set repository secrets: {e}")
+            # Continue anyway - secrets might be set already
+
         # Add CI/CD and Dockerfile directly to GitHub using API (idempotent)
         try:
             print(f"🧩 Adding CI/CD + Dockerfile to repo: {repo_url}")
@@ -1652,30 +1668,7 @@ def create_service():
         except Exception:
             pass
         
-        # Ensure secrets exist for this repository (GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL)
-        try:
-            print("Setting repository secrets before completing service creation...")
-            print(f"Repository URL: {repo_url}")
-            print(f"GitHub token: {'SET' if github_token else 'NOT SET'}")
-            print(f"Manifests token: {'SET' if manifests_token else 'NOT SET'}")
-            secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
-            print(f"Secrets result: {secrets_result}")
-            if not secrets_result:
-                return jsonify({
-                    'error': 'Failed to set repository secrets. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work. Please check your tokens and try again.'
-                }), 400
-            
-            # Wait longer to ensure secrets are propagated
-            print("Waiting for secrets to be propagated...")
-            import time
-            time.sleep(15)  # Increased from 5 to 15 seconds
-            print("✅ Repository secrets set successfully")
-            
-        except Exception as e:
-            print(f"Warning: Could not set repository secrets: {e}")
-            return jsonify({
-                'error': f'Failed to set repository secrets: {str(e)}. MANIFESTS_REPO_TOKEN and ARGOCD_WEBHOOK_URL are required for GitHub Actions to work.'
-            }), 400
+        # Secrets were already set before adding CI/CD, no need to set again
 
         # Add webhook information to response
         if webhook_result['success']:

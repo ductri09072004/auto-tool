@@ -107,9 +107,9 @@ jobs:
       id: wait_secrets
       run: |
         echo "⏳ Waiting for MANIFESTS_REPO_TOKEN to be available..."
-        echo "GitHub secrets can take up to 60 seconds to propagate after being set."
+        echo "GitHub secrets can take up to 120 seconds to propagate after being set."
         
-        MAX_ATTEMPTS=12  # 12 attempts x 5 seconds = 60 seconds
+        MAX_ATTEMPTS=24  # 24 attempts x 5 seconds = 120 seconds
         ATTEMPT=0
         
         while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
@@ -138,7 +138,7 @@ jobs:
           fi
         done
         
-        echo "❌ MANIFESTS_REPO_TOKEN is still not available after 60 seconds"
+        echo "❌ MANIFESTS_REPO_TOKEN is still not available after 120 seconds"
         echo "This secret should have been set automatically when the service was created."
         echo "Please check:"
         echo "  1. Go to Settings > Secrets and variables > Actions"
