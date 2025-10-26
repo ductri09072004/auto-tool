@@ -3265,8 +3265,11 @@ spec:
                 print(f"Error in delete_yaml_files_after_sync: {e}")
         
         # Start background thread to delete YAML files
-        delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
-        delete_thread.start()
+        # NOTE: Disabled because ArgoCD Application is now created by CI/CD pipeline
+        # The CI/CD pipeline handles the complete flow including ArgoCD sync
+        # delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
+        # delete_thread.start()
+        print("ℹ️ Skipping YAML deletion - CI/CD pipeline handles ArgoCD deployment")
 
         return {
             'success': True,
