@@ -516,7 +516,16 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
                     print(f"⚠️ Conflict for {file_path} (attempt {attempt + 1}/{max_retries}), retrying...")
                     if attempt < max_retries - 1:
                         import time
-                        time.sleep(1)  # Wait 1 second before retry
+                        time.sleep(2)  # Wait 2 seconds before retry
+                        # Re-fetch the latest SHA before retrying
+                        print(f"   Re-fetching latest SHA for {file_path}...")
+                        get_response = requests.get(contents_url, headers=headers)
+                        if get_response.status_code == 200:
+                            existing_data = get_response.json()
+                            sha = existing_data.get('sha')
+                            if sha:
+                                file_data['sha'] = sha
+                                print(f"   Updated SHA to {sha[:10]}...")
                         continue
                     else:
                         return {'success': False, 'error': f'Failed to push {file_path} after {max_retries} attempts due to conflicts: {put_response.text}'}
