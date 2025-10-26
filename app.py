@@ -2952,18 +2952,9 @@ spec:
             else:
                 print(f"DEBUG: Service directory {service_source_dir} does not exist!")
             
-            # Also add ArgoCD application file
-            apps_dir = os.path.join(tmpdir, 'apps')
-            if os.path.exists(apps_dir):
-                for root, dirs, files in os.walk(apps_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(file_path, tmpdir)
-                        
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                        
-                        files_to_push[relative_path] = content
+            # DO NOT add ArgoCD application file here - it will be created after CI/CD completes
+            # This prevents ArgoCD from syncing before the image is built
+            print("⚠️ Skipping ArgoCD application file - will be created after CI/CD completes")
             
             # Push using GitHub API
             # Use token from service data or fallback to config
@@ -2984,26 +2975,9 @@ spec:
             
             print(f"Successfully pushed files using GitHub API: {push_result.get('commit_sha', 'N/A')}")
 
-        # Auto-deploy ArgoCD Application after successful push
-        if has_git_command() and not is_railway_environment():
-            # Use kubectl for local development
-            try:
-                subprocess.run(['kubectl', 'apply', '-f', app_file], check=True, capture_output=True)
-                print(f"ArgoCD Application '{service_name}' deployed successfully")
-            except subprocess.CalledProcessError as e:
-                print(f"ArgoCD Application deploy failed: {e.stderr.decode()}")
-        else:
-            # On Railway, try to deploy via ArgoCD API
-            try:
-                deploy_result = _deploy_argocd_application_via_api(service_name, repo_b_url, namespace)
-                if deploy_result['success']:
-                    print(f"✅ ArgoCD Application '{service_name}' deployed successfully via API")
-                else:
-                    print(f"⚠️ ArgoCD API deploy failed: {deploy_result['error']}")
-                    print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
-            except Exception as e:
-                print(f"⚠️ ArgoCD API deploy error: {e}")
-                print(f"ArgoCD Application YAML created for {service_name} - deploy manually or via ArgoCD UI")
+        # DO NOT deploy ArgoCD Application here - it will be created after CI/CD completes
+        # This prevents ArgoCD from syncing before the image is built
+        print("⚠️ ArgoCD Application will be created after CI/CD completes")
         
         print(f"Service '{service_name}' created with YAML manifests in Repo B")
         
