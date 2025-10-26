@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ,master]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:  # Allow manual triggering
 
 env:
   REGISTRY: ghcr.io
@@ -98,35 +99,42 @@ jobs:
   update-manifests:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     
     steps:
-    - name: Wait for secrets to be available
+    - name: Verify secrets availability
+      id: verify_secrets
       run: |
-        echo "Waiting for repository secrets to be set..."
-        sleep 15
-        echo "Checking for MANIFESTS_REPO_TOKEN..."
+        echo "🔍 Checking MANIFESTS_REPO_TOKEN availability..."
         
-        # Retry mechanism for checking secrets with longer wait times
-        for i in {1..10}; do
-          if [ -n "${{ secrets.MANIFESTS_REPO_TOKEN }}" ]; then
-            echo "✅ MANIFESTS_REPO_TOKEN is available (attempt $i)"
-            break
-          else
-            echo "⏳ MANIFESTS_REPO_TOKEN not ready yet (attempt $i/10)"
-            if [ $i -eq 10 ]; then
-              echo "ERROR: MANIFESTS_REPO_TOKEN is required to push to Repo B."
-              echo "Please add it in Settings > Secrets and variables > Actions."
-              echo "This token should have been set automatically when the service was created."
-              echo "If this is a new service, please re-run the service creation process."
-              echo "Alternatively, you can manually re-run this workflow after a few minutes."
-              exit 1
-            fi
-            sleep 10
-          fi
-        done
+        TOKEN="${{ secrets.MANIFESTS_REPO_TOKEN }}"
+        
+        if [ -z "$TOKEN" ]; then
+          echo "❌ MANIFESTS_REPO_TOKEN is not available"
+          echo "This secret should have been set automatically when the service was created."
+          echo "Please check:"
+          echo "  1. Go to Settings > Secrets and variables > Actions"
+          echo "  2. Verify MANIFESTS_REPO_TOKEN exists"
+          echo "  3. If not, re-run the service creation process"
+          echo ""
+          echo "Alternatively, re-run this workflow after 2-3 minutes."
+          exit 1
+        fi
+        
+        echo "✅ MANIFESTS_REPO_TOKEN is available!"
+        
+        # Verify token has access to repo
+        echo "Verifying token has access to manifests repository..."
+        git ls-remote --exit-code https://$TOKEN@github.com/ductri09072004/demo_fiss1_B.git > /dev/null 2>&1
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ Token verified successfully!"
+        else
+          echo "⚠️ Token present but may not have access to repo"
+          echo "Continuing anyway - this might be a propagation delay"
+        fi
 
     - name: Checkout manifests repo
       uses: actions/checkout@v4

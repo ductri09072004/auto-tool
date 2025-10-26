@@ -1446,7 +1446,8 @@ def create_service():
     try:
         # Get form data
         github_token = request.form.get('github_token', '').strip()
-        manifests_token = request.form.get('manifests_token', '').strip()
+        # manifests_token is now optional - use config default if not provided
+        manifests_token = request.form.get('manifests_token', '').strip() or MANIFESTS_REPO_TOKEN
         service_name = request.form.get('service_name')
         description = request.form.get('description')
         repo_url = request.form.get('repo_url', '').strip()
@@ -1458,10 +1459,6 @@ def create_service():
         # Validate GitHub token
         if not github_token:
             return jsonify({'error': 'GitHub token is required'}), 400
-        
-        # Validate manifests token
-        if not manifests_token:
-            return jsonify({'error': 'Manifests repository token is required'}), 400
         
         # Test GitHub token validity
         try:
@@ -2760,20 +2757,18 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         
         # List of YAML files to create
         yaml_files = [
-                'deployment.yaml',
-                'service.yaml', 
-                'configmap.yaml',
-                'hpa.yaml',
-                'ingress.yaml',
-                'ingress-gateway.yaml',
-                'namespace.yaml',
-                'secret.yaml'
-            ]
-            
+            'deployment.yaml',
+            'service.yaml', 
+            'configmap.yaml',
+            'hpa.yaml',
+            'ingress.yaml',
+            'ingress-gateway.yaml',
+            'namespace.yaml',
+            'secret.yaml'
+        ]
+        
         # Check if we have local templates or need to use inline templates
         use_local_templates = os.path.exists(k8s_template_dir)
-        if not use_local_templates:
-            print("Using inline templates for Railway deployment")
         
         for yaml_file in yaml_files:
             dst_file = os.path.join(k8s_dir, yaml_file)
@@ -2832,9 +2827,11 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
             apps_dir = os.path.join(clone_dir, 'apps')
+            print(f"DEBUG: Creating apps directory: {apps_dir}")
         else:
             # Railway deployment - use temporary directory
             apps_dir = os.path.join(tmpdir, 'apps')
+            print(f"DEBUG: Creating apps directory: {apps_dir}")
         
         os.makedirs(apps_dir, exist_ok=True)
         app_file = os.path.join(apps_dir, f'{service_name}-application.yaml')
@@ -3042,12 +3039,12 @@ spec:
                                         pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
                                                                    capture_output=True, text=True)
                                         pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
-                                    
-                                    if pods_running:
-                                        print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
-                                        break
-                                    else:
-                                        print(f"ArgoCD synced but pods not running yet for {service_name}...")
+                                        
+                                        if pods_running:
+                                            print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
+                                            break
+                                        else:
+                                            print(f"ArgoCD synced but pods not running yet for {service_name}...")
                             else:
                                 # If no sync change detected yet, continue waiting
                                 if not sync_changed:
