@@ -482,7 +482,9 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
             for attempt in range(max_retries):
                 # Check if file exists (get fresh SHA each time)
                 contents_url = f'https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}'
+                print(f"🔍 Checking file status: {file_path}")
                 get_response = requests.get(contents_url, headers=headers)
+                print(f"   GET Status: {get_response.status_code}")
                 
                 file_data = {
                     'message': f'{commit_message} - {file_path}',
@@ -492,11 +494,19 @@ def push_files_to_github_api(repo_url, files_to_push, commit_message, github_tok
                 if get_response.status_code == 200:
                     # File exists, update it with fresh SHA
                     existing_data = get_response.json()
-                    file_data['sha'] = existing_data['sha']
+                    sha = existing_data.get('sha')
+                    if sha:
+                        file_data['sha'] = sha
+                        print(f"📝 Updating existing file {file_path} with SHA {sha[:10]}...")
+                    else:
+                        print(f"⚠️ Warning: File {file_path} exists but no SHA found in response")
+                    put_response = requests.put(contents_url, headers=headers, json=file_data)
+                elif get_response.status_code == 404:
+                    # File doesn't exist, create it
+                    print(f"📄 Creating new file {file_path}")
                     put_response = requests.put(contents_url, headers=headers, json=file_data)
                 else:
-                    # File doesn't exist, create it
-                    put_response = requests.put(contents_url, headers=headers, json=file_data)
+                    return {'success': False, 'error': f'Failed to check file status for {file_path}: {get_response.status_code} - {get_response.text}'}
                 
                 if put_response.status_code in [200, 201]:
                     print(f"✅ Successfully pushed {file_path}")
