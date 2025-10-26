@@ -96,46 +96,66 @@ jobs:
         
     # Removed explicit package visibility change to avoid 404 timing/scope issues
 
-  update-manifests:
+  wait-for-secrets:
     needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 5
+    
+    steps:
+    - name: Wait for secrets propagation
+      id: wait_secrets
+      run: |
+        echo "⏳ Waiting for MANIFESTS_REPO_TOKEN to be available..."
+        echo "GitHub secrets can take up to 60 seconds to propagate after being set."
+        
+        MAX_ATTEMPTS=12  # 12 attempts x 5 seconds = 60 seconds
+        ATTEMPT=0
+        
+        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+          ATTEMPT=$((ATTEMPT + 1))
+          TOKEN="${{ secrets.MANIFESTS_REPO_TOKEN }}"
+          
+          if [ -n "$TOKEN" ]; then
+            echo "✅ MANIFESTS_REPO_TOKEN is now available! (attempt $ATTEMPT)"
+            # Verify token has access to repo
+            echo "Verifying token has access to manifests repository..."
+            git ls-remote --exit-code https://$TOKEN@github.com/ductri09072004/demo_fiss1_B.git > /dev/null 2>&1
+            
+            if [ $? -eq 0 ]; then
+              echo "✅ Token verified successfully!"
+              exit 0
+            else
+              echo "⚠️ Token present but may not have access yet (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+            fi
+          else
+            echo "⏳ MANIFESTS_REPO_TOKEN not available yet (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+          fi
+          
+          if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+            echo "⏳ Waiting 5 seconds before retry..."
+            sleep 5
+          fi
+        done
+        
+        echo "❌ MANIFESTS_REPO_TOKEN is still not available after 60 seconds"
+        echo "This secret should have been set automatically when the service was created."
+        echo "Please check:"
+        echo "  1. Go to Settings > Secrets and variables > Actions"
+        echo "  2. Verify MANIFESTS_REPO_TOKEN exists"
+        echo "  3. If not, re-run the service creation process"
+        echo ""
+        echo "The workflow will exit now. Please re-run this workflow after the secret is set."
+        exit 1
+
+  update-manifests:
+    needs: wait-for-secrets
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     
     steps:
-    - name: Verify secrets availability
-      id: verify_secrets
-      run: |
-        echo "🔍 Checking MANIFESTS_REPO_TOKEN availability..."
-        
-        TOKEN="${{ secrets.MANIFESTS_REPO_TOKEN }}"
-        
-        if [ -z "$TOKEN" ]; then
-          echo "❌ MANIFESTS_REPO_TOKEN is not available"
-          echo "This secret should have been set automatically when the service was created."
-          echo "Please check:"
-          echo "  1. Go to Settings > Secrets and variables > Actions"
-          echo "  2. Verify MANIFESTS_REPO_TOKEN exists"
-          echo "  3. If not, re-run the service creation process"
-          echo ""
-          echo "Alternatively, re-run this workflow after 2-3 minutes."
-          exit 1
-        fi
-        
-        echo "✅ MANIFESTS_REPO_TOKEN is available!"
-        
-        # Verify token has access to repo
-        echo "Verifying token has access to manifests repository..."
-        git ls-remote --exit-code https://$TOKEN@github.com/ductri09072004/demo_fiss1_B.git > /dev/null 2>&1
-        
-        if [ $? -eq 0 ]; then
-          echo "✅ Token verified successfully!"
-        else
-          echo "⚠️ Token present but may not have access to repo"
-          echo "Continuing anyway - this might be a propagation delay"
-        fi
-
     - name: Checkout manifests repo
       uses: actions/checkout@v4
       with:

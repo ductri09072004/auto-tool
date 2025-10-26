@@ -633,25 +633,38 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
         owner, repo_name = parts[0], parts[1]
         base = f"https://api.github.com/repos/{owner}/{repo_name}/actions/secrets"
         token_to_use = github_token or GITHUB_TOKEN
+        
+        print(f"\n{'='*80}")
+        print(f"🔐 DEBUG: ensure_repo_secrets called")
+        print(f"   Repo URL: {repo_url}")
+        print(f"   Repo: {owner}/{repo_name}")
+        print(f"   GitHub Token: {'SET' if token_to_use else 'NOT SET'}")
+        print(f"   Manifests Token (param): {'SET' if manifests_token else 'NOT SET'}")
+        print(f"   MANIFESTS_REPO_TOKEN (config): {'SET' if MANIFESTS_REPO_TOKEN else 'NOT SET'}")
+        print(f"   ARGOCD_WEBHOOK_URL: {'SET' if ARGOCD_WEBHOOK_URL else 'NOT SET'}")
+        print(f"{'='*80}\n")
+        
         headers = {
             'Authorization': f'token {token_to_use}',
             'Accept': 'application/vnd.github+json'
         }
 
         # Fetch public key
-        print(f"Fetching public key from: {base}/public-key")
-        print(f"Using token: {token_to_use[:10]}..." if token_to_use else "No token")
+        print(f"📥 Fetching public key from: {base}/public-key")
         pk_resp = requests.get(f"{base}/public-key", headers=headers)
-        print(f"Public key response: {pk_resp.status_code}")
+        print(f"   Response status: {pk_resp.status_code}")
         if pk_resp.status_code != 200:
-            print(f"WARNING: Cannot access repo secrets: {pk_resp.status_code} {pk_resp.text}")
-            print(f"INFO: This might be because Actions is not enabled or no permission")
-            print(f"INFO: Continuing without setting secrets...")
+            print(f"❌ WARNING: Cannot access repo secrets: {pk_resp.status_code}")
+            print(f"   Response: {pk_resp.text}")
+            print(f"   This might be because Actions is not enabled or no permission")
+            print(f"   Continuing without setting secrets...")
             return True  # Continue deployment, just skip secrets
+            
         pk_json = pk_resp.json()
         repo_public_key = pk_json.get('key')
         key_id = pk_json.get('key_id')
         if not repo_public_key or not key_id:
+            print(f"❌ Failed to get public key or key_id")
             return False
 
         # Encrypt and upsert secrets
@@ -661,22 +674,28 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
         if not manifests_token:
             manifests_token = MANIFESTS_REPO_TOKEN
         
-        print(f"Setting secrets for repo: {repo_url}")
-        print(f"GHCR_TOKEN: {ghcr_token[:10]}...")
-        print(f"MANIFESTS_REPO_TOKEN: {manifests_token[:10]}...")
-        print(f"ARGOCD_WEBHOOK_URL: {ARGOCD_WEBHOOK_URL}")
+        print(f"\n🔑 Setting secrets for repo: {owner}/{repo_name}")
+        print(f"   GHCR_TOKEN: {'SET' if ghcr_token else 'EMPTY'}")
+        print(f"   MANIFESTS_REPO_TOKEN: {'SET' if manifests_token else 'EMPTY'}")
+        print(f"   ARGOCD_WEBHOOK_URL: {'SET' if ARGOCD_WEBHOOK_URL else 'EMPTY'}")
         
         updates = {
             'GHCR_TOKEN': ghcr_token,
             'MANIFESTS_REPO_TOKEN': manifests_token,
             'ARGOCD_WEBHOOK_URL': ARGOCD_WEBHOOK_URL
         }
-        print(f"Setting secrets: {list(updates.keys())}")
+        
+        # Track results
+        results = {}
         for name, value in updates.items():
-            print(f"Checking {name}: {'SET' if value else 'EMPTY'}")
+            print(f"\n🔧 Processing secret: {name}")
+            print(f"   Value: {'SET' if value else 'EMPTY'}")
+            
             if not value:
-                print(f"WARNING: {name} is empty, skipping...")
+                print(f"   ⚠️ WARNING: {name} is empty, skipping...")
+                results[name] = {'status': 'skipped', 'reason': 'empty_value'}
                 continue
+                
             # Retry logic for setting secrets
             max_retries = 3
             for attempt in range(max_retries):
@@ -687,33 +706,59 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
                         headers={**headers, 'Content-Type': 'application/json'},
                         json={'encrypted_value': encrypted_value, 'key_id': key_id}
                     )
+                    
+                    print(f"   Attempt {attempt + 1}/{max_retries}: Status {put_resp.status_code}")
+                    
                     if put_resp.status_code in [201, 204]:
-                        print(f"SUCCESS: Successfully set secret {name}")
+                        print(f"   ✅ SUCCESS: Successfully set secret {name}")
+                        results[name] = {'status': 'success', 'attempt': attempt + 1}
                         break
                     else:
-                        print(f"ERROR: Failed to set secret {name}: {put_resp.status_code} {put_resp.text}")
+                        print(f"   ❌ ERROR: Failed to set {name}: {put_resp.status_code}")
+                        print(f"      Response: {put_resp.text[:200]}")
                         if attempt < max_retries - 1:
-                            print(f"Retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})")
+                            print(f"   ⏳ Retrying in 5 seconds...")
                             time.sleep(5)
                         else:
-                            print(f"CRITICAL: Failed to set {name} after {max_retries} attempts!")
+                            print(f"   ❌ CRITICAL: Failed to set {name} after {max_retries} attempts!")
+                            results[name] = {'status': 'failed', 'attempts': max_retries, 'last_status': put_resp.status_code}
                             if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
-                                print(f"CRITICAL: {name} is required for GitHub Actions to work!")
+                                print(f"   ❌ CRITICAL: {name} is required for GitHub Actions to work!")
                                 return False
                 except Exception as e:
-                    print(f"ERROR: Exception while setting secret {name}: {e}")
+                    print(f"   ❌ ERROR: Exception while setting secret {name}: {e}")
                     if attempt < max_retries - 1:
-                        print(f"Retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})")
+                        print(f"   ⏳ Retrying in 5 seconds...")
                         time.sleep(5)
                     else:
+                        results[name] = {'status': 'exception', 'error': str(e)}
                         if name in ['MANIFESTS_REPO_TOKEN', 'ARGOCD_WEBHOOK_URL']:
-                            print(f"CRITICAL: {name} is required for GitHub Actions to work!")
+                            print(f"   ❌ CRITICAL: {name} is required for GitHub Actions to work!")
                             return False
-        print("✅ All secrets set successfully")
+        
+        # Summary
+        print(f"\n{'='*80}")
+        print(f"📊 Summary of secrets setup:")
+        for name, result in results.items():
+            status = result.get('status', 'unknown')
+            if status == 'success':
+                print(f"   ✅ {name}: SUCCESS (attempt {result.get('attempt', '?')})")
+            elif status == 'skipped':
+                print(f"   ⚠️ {name}: SKIPPED ({result.get('reason', 'unknown')})")
+            elif status == 'failed':
+                print(f"   ❌ {name}: FAILED (after {result.get('attempts', '?')} attempts)")
+            else:
+                print(f"   ❌ {name}: ERROR - {result.get('error', 'unknown error')}")
+        print(f"{'='*80}\n")
+        
+        print("✅ All secrets processed (some may be skipped or failed)")
         return True
+        
     except Exception as e:
-        print(f"ERROR: ensure_repo_secrets error: {e}")
-        print(f"INFO: This will cause GitHub Actions to fail!")
+        print(f"❌ ERROR: ensure_repo_secrets error: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"   This will cause GitHub Actions to fail!")
         return False  # Return False to indicate failure
 
 def add_prometheus_scrape_job(service_name, service_port):
