@@ -679,10 +679,14 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
         print(f"   MANIFESTS_REPO_TOKEN: {'SET' if manifests_token else 'EMPTY'}")
         print(f"   ARGOCD_WEBHOOK_URL: {'SET' if ARGOCD_WEBHOOK_URL else 'EMPTY'}")
         
+        from config import ARGOCD_SERVER_URL, ARGOCD_ADMIN_PASSWORD
+        
         updates = {
             'GHCR_TOKEN': ghcr_token,
             'MANIFESTS_REPO_TOKEN': manifests_token,
-            'ARGOCD_WEBHOOK_URL': ARGOCD_WEBHOOK_URL
+            'ARGOCD_WEBHOOK_URL': ARGOCD_WEBHOOK_URL,
+            'ARGOCD_SERVER_URL': ARGOCD_SERVER_URL,
+            'ARGOCD_ADMIN_PASSWORD': ARGOCD_ADMIN_PASSWORD
         }
         
         # Track results
