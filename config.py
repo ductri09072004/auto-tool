@@ -13,7 +13,8 @@ MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
 ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://auto-tool.up.railway.app/api/webhook')
 
 # ArgoCD API Configuration
-ARGOCD_SERVER_URL = os.getenv('ARGOCD_SERVER_URL', 'https://c4e569f546a3.ngrok-free.app')
+# Note: Use https:// for ngrok URLs, ArgoCD automatically redirects HTTP to HTTPS
+ARGOCD_SERVER_URL = os.getenv('ARGOCD_SERVER_URL', 'https://e509ac06fcdf.ngrok-free.app')
 ARGOCD_TOKEN = os.getenv('ARGOCD_TOKEN', '')
 ARGOCD_ADMIN_PASSWORD = os.getenv('ARGOCD_ADMIN_PASSWORD', 'IG42zHWiFya1XbaR')
 

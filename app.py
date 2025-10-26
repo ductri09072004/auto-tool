@@ -45,7 +45,8 @@ def _get_argocd_session_token():
         }
         
         print(f"🔐 Attempting to login to ArgoCD at {login_url}")
-        response = requests.post(login_url, json=login_data, timeout=10, verify=False)
+        headers = {'ngrok-skip-browser-warning': 'true'}
+        response = requests.post(login_url, json=login_data, headers=headers, timeout=10, verify=False, allow_redirects=True)
         
         if response.status_code == 200:
             token = response.json().get('token')
@@ -81,14 +82,16 @@ def _check_argocd_application_status(service_name):
         # Check application status
         headers = {
             'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true'
         }
         
         response = requests.get(
             f"{ARGOCD_SERVER_URL}/api/v1/applications/{service_name}",
             headers=headers,
             timeout=10,
-            verify=False
+            verify=False,
+            allow_redirects=True
         )
         
         if response.status_code == 200:
@@ -180,12 +183,13 @@ def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
         # Make API call to ArgoCD
         headers = {
             'Authorization': f'Bearer {argocd_token}',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true'
         }
         
         # Try to create application
         create_url = f"{argocd_server}/api/v1/applications"
-        response = requests.post(create_url, json=app_data, headers=headers, timeout=30, verify=False)
+        response = requests.post(create_url, json=app_data, headers=headers, timeout=30, verify=False, allow_redirects=True)
         
         if response.status_code in [200, 201]:
             print(f"✅ ArgoCD Application '{service_name}' created successfully")
@@ -194,7 +198,7 @@ def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
             # Application already exists, try to update
             print(f"Application '{service_name}' already exists, updating...")
             update_url = f"{argocd_server}/api/v1/applications/{service_name}"
-            update_response = requests.put(update_url, json=app_data, headers=headers, timeout=30, verify=False)
+            update_response = requests.put(update_url, json=app_data, headers=headers, timeout=30, verify=False, allow_redirects=True)
             
             if update_response.status_code in [200, 201]:
                 print(f"✅ ArgoCD Application '{service_name}' updated successfully")
