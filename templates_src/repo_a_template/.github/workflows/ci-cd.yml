@@ -245,8 +245,13 @@ jobs:
         ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
         ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
         
+        echo "🔍 Checking ArgoCD configuration..."
+        echo "   ARGOCD_SERVER: ${ARGOCD_SERVER:+SET}${ARGOCD_SERVER:-NOT SET}"
+        echo "   ARGOCD_PASSWORD: ${ARGOCD_PASSWORD:+SET}${ARGOCD_PASSWORD:-NOT SET}"
+        
         if [ -z "$ARGOCD_SERVER" ] || [ -z "$ARGOCD_PASSWORD" ]; then
           echo "⚠️ ArgoCD credentials not configured - skipping deployment"
+          echo "💡 Please set ARGOCD_SERVER_URL and ARGOCD_ADMIN_PASSWORD in Repo A secrets"
           exit 0
         fi
         
@@ -330,6 +335,7 @@ jobs:
         
         if [ -z "$ARGOCD_SERVER" ] || [ -z "$ARGOCD_PASSWORD" ]; then
           echo "⚠️ ArgoCD credentials not configured - skipping sync trigger"
+          echo "💡 Please set ARGOCD_SERVER_URL and ARGOCD_ADMIN_PASSWORD in Repo A secrets"
           exit 0
         fi
         
