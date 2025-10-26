@@ -322,50 +322,45 @@ jobs:
           echo "⚠️ Failed to get ArgoCD session: $SESSION_RESP"
         fi
         
-    - name: Wait for ArgoCD Auto-Sync
+    - name: Trigger ArgoCD Sync
       run: |
-        echo "✅ ArgoCD Application deployed"
-        echo "📋 ArgoCD will automatically sync when Repo B is updated"
-        echo "⏳ Checking ArgoCD sync status..."
-        
         SERVICE="${{ github.event.repository.name }}"
         ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
         ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
         
         if [ -z "$ARGOCD_SERVER" ] || [ -z "$ARGOCD_PASSWORD" ]; then
-          echo "⚠️ ArgoCD credentials not configured - skipping status check"
+          echo "⚠️ ArgoCD credentials not configured - skipping sync trigger"
           exit 0
         fi
         
-        # Wait for ArgoCD to pick up changes (max 60 seconds)
-        for i in {1..12}; do
-          echo "⏳ Checking sync status (attempt $i/12)..."
+        echo "🔄 Triggering ArgoCD sync for $SERVICE..."
+        
+        # Login to ArgoCD
+        SESSION_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/session" \
+          -H "Content-Type: application/json" \
+          -H "ngrok-skip-browser-warning: true" \
+          -d "{\"username\":\"admin\",\"password\":\"$ARGOCD_PASSWORD\"}" \
+          -k \
+          -c /tmp/argocd-sync-cookies.txt)
+        
+        if echo "$SESSION_RESP" | grep -q "token"; then
+          echo "✅ Logged in to ArgoCD"
           
-          # Login to ArgoCD
-          SESSION_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/session" \
+          # Trigger sync via API
+          SYNC_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/applications/$SERVICE/sync" \
             -H "Content-Type: application/json" \
             -H "ngrok-skip-browser-warning: true" \
-            -d "{\"username\":\"admin\",\"password\":\"$ARGOCD_PASSWORD\"}" \
-            -k \
-            -c /tmp/argocd-check-cookies.txt)
+            -b /tmp/argocd-sync-cookies.txt \
+            -d '{"revision":"HEAD","prune":true,"dryRun":false}' \
+            -k)
           
-          if echo "$SESSION_RESP" | grep -q "token"; then
-            # Check application status
-            STATUS_RESP=$(curl -s -X GET "$ARGOCD_SERVER/api/v1/applications/$SERVICE" \
-              -H "ngrok-skip-browser-warning: true" \
-              -b /tmp/argocd-check-cookies.txt \
-              -k)
-            
-            if echo "$STATUS_RESP" | grep -q '"sync":{"status":"Synced"'; then
-              echo "✅ ArgoCD Application is synced!"
-              exit 0
-            fi
+          if echo "$SYNC_RESP" | grep -q "operationState"; then
+            echo "✅ ArgoCD sync triggered successfully!"
+          else
+            echo "⚠️ Sync trigger response: $SYNC_RESP"
           fi
-          
-          sleep 5
-        done
-        
-        echo "⚠️ ArgoCD sync is still in progress (this is normal)"
-        echo "💡 Check ArgoCD UI at $ARGOCD_SERVER for detailed status"
+        else
+          echo "⚠️ Failed to login to ArgoCD - sync will happen automatically"
+        fi
 
 
