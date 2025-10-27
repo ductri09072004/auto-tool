@@ -557,6 +557,11 @@ def start_port_forward():
     """Start port-forward in background if not already running"""
     global port_forward_process
     
+    # Skip port-forward on Railway environment
+    if is_railway_environment():
+        print("Skipping port-forward on Railway environment")
+        return False
+    
     # Check if port-forward is already running
     if port_forward_process and port_forward_process.poll() is None:
         print("Port-forward already running")
@@ -1033,29 +1038,32 @@ def get_services():
                 total_requests = 0
                 avg_response_time = 'N/A'
                 uptime = 'N/A'
-                try:
-                    import requests as http_requests
-                    health_url = f"http://127.0.0.1:8081/api/{service_name}/api/health"
-                    headers = {'Host': 'gateway.local'}
+                
+                # Skip health metrics on Railway environment
+                if not is_railway_environment():
                     try:
-                        health_response = http_requests.get(health_url, headers=headers, timeout=3)
-                    except requests.exceptions.ConnectionError:
-                        start_port_forward()
-                        time.sleep(2)
-                        health_response = http_requests.get(health_url, headers=headers, timeout=5)
-                    if health_response.status_code == 200:
-                        health_data = health_response.json()
-                        system_metrics = health_data.get('system_metrics', {})
-                        service_metrics = health_data.get('service_metrics', {})
-                        cpu_usage = system_metrics.get('cpu_usage', 'N/A')
-                        memory_usage = system_metrics.get('memory_usage', 'N/A')
-                        disk_usage = system_metrics.get('disk_usage', 'N/A')
-                        process_memory = system_metrics.get('process_memory_mb', 'N/A')
-                        total_requests = service_metrics.get('total_requests', 0)
-                        avg_response_time = service_metrics.get('avg_response_time_ms', 'N/A')
-                        uptime = health_data.get('uptime', 'N/A')
-                except Exception as e:
-                    print(f"Warning: Could not get health metrics for {service_name}: {e}")
+                        import requests as http_requests
+                        health_url = f"http://127.0.0.1:8081/api/{service_name}/api/health"
+                        headers = {'Host': 'gateway.local'}
+                        try:
+                            health_response = http_requests.get(health_url, headers=headers, timeout=3)
+                        except requests.exceptions.ConnectionError:
+                            start_port_forward()
+                            time.sleep(2)
+                            health_response = http_requests.get(health_url, headers=headers, timeout=5)
+                        if health_response.status_code == 200:
+                            health_data = health_response.json()
+                            system_metrics = health_data.get('system_metrics', {})
+                            service_metrics = health_data.get('service_metrics', {})
+                            cpu_usage = system_metrics.get('cpu_usage', 'N/A')
+                            memory_usage = system_metrics.get('memory_usage', 'N/A')
+                            disk_usage = system_metrics.get('disk_usage', 'N/A')
+                            process_memory = system_metrics.get('process_memory_mb', 'N/A')
+                            total_requests = service_metrics.get('total_requests', 0)
+                            avg_response_time = service_metrics.get('avg_response_time_ms', 'N/A')
+                            uptime = health_data.get('uptime', 'N/A')
+                    except Exception as e:
+                        print(f"Warning: Could not get health metrics for {service_name}: {e}")
 
                 try:
                     if is_railway_environment():
