@@ -1122,8 +1122,61 @@ def get_services():
                 avg_response_time = 'N/A'
                 uptime = 'N/A'
                 
-                # Skip health metrics on Railway environment
-                if not is_railway_environment():
+                # Health metrics collection with fallback strategy
+                if is_railway_environment():
+                    # Railway: Use ArgoCD API + basic metrics
+                    try:
+                        session_token = _get_argocd_session_token()
+                        if session_token:
+                            headers = {
+                                'Authorization': f'Bearer {session_token}',
+                                'ngrok-skip-browser-warning': 'true'
+                            }
+                            app_response = requests.get(f"{ARGOCD_SERVER_URL}/api/v1/applications/{service_name}", 
+                                                       headers=headers, timeout=10, verify=False)
+                            if app_response.status_code == 200:
+                                app_data = app_response.json()
+                                status = app_data.get('status', {})
+                                
+                                # Basic metrics from ArgoCD
+                                health_status = status.get('health', {}).get('status', 'Unknown')
+                                sync_status = status.get('sync', {}).get('status', 'Unknown')
+                                
+                                # Pod info for uptime calculation
+                                resources = status.get('resources', [])
+                                if resources:
+                                    pod = resources[0] if resources else {}
+                                    created_at = pod.get('createdAt', '')
+                                    if created_at:
+                                        from datetime import datetime
+                                        try:
+                                            created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                                            uptime_seconds = (datetime.now().replace(tzinfo=created_time.tzinfo) - created_time).total_seconds()
+                                            uptime = f"{int(uptime_seconds // 3600)}h {int((uptime_seconds % 3600) // 60)}m"
+                                        except:
+                                            uptime = 'N/A'
+                                    else:
+                                        uptime = 'N/A'
+                                else:
+                                    uptime = 'N/A'
+                                
+                                # Set basic metrics (no detailed CPU/memory from ArgoCD API)
+                                cpu_usage = 'N/A'
+                                memory_usage = 'N/A'
+                                disk_usage = 'N/A'
+                                process_memory = 'N/A'
+                                total_requests = 0
+                                avg_response_time = 'N/A'
+                                
+                                print(f"✅ ArgoCD metrics collected for {service_name}: Health={health_status}, Sync={sync_status}")
+                            else:
+                                print(f"⚠️ ArgoCD API returned {app_response.status_code} for {service_name}")
+                        else:
+                            print(f"⚠️ Could not get ArgoCD session token for {service_name}")
+                    except Exception as e:
+                        print(f"⚠️ Error getting ArgoCD metrics for {service_name}: {e}")
+                else:
+                    # Local: Try /api/health endpoint first, fallback to basic metrics
                     try:
                         import requests as http_requests
                         health_url = f"http://127.0.0.1:8081/api/{service_name}/api/health"
@@ -1134,7 +1187,9 @@ def get_services():
                             start_port_forward()
                             time.sleep(2)
                             health_response = http_requests.get(health_url, headers=headers, timeout=5)
+                        
                         if health_response.status_code == 200:
+                            # Service has /api/health endpoint - use detailed metrics
                             health_data = health_response.json()
                             system_metrics = health_data.get('system_metrics', {})
                             service_metrics = health_data.get('service_metrics', {})
@@ -1145,6 +1200,17 @@ def get_services():
                             total_requests = service_metrics.get('total_requests', 0)
                             avg_response_time = service_metrics.get('avg_response_time_ms', 'N/A')
                             uptime = health_data.get('uptime', 'N/A')
+                            print(f"✅ Health endpoint metrics collected for {service_name}")
+                        else:
+                            # Service doesn't have /api/health - use basic metrics
+                            print(f"⚠️ Service {service_name} doesn't have /api/health endpoint, using basic metrics")
+                            cpu_usage = 'N/A'
+                            memory_usage = 'N/A'
+                            disk_usage = 'N/A'
+                            process_memory = 'N/A'
+                            total_requests = 0
+                            avg_response_time = 'N/A'
+                            uptime = 'N/A'
                     except Exception as e:
                         print(f"Warning: Could not get health metrics for {service_name}: {e}")
 
