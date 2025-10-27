@@ -294,6 +294,20 @@ jobs:
         token: ${{ secrets.MANIFESTS_REPO_TOKEN }}
         path: manifests
         
+    - name: Debug SERVICE_NAME secret
+      run: |
+        echo "🔍 Debugging SERVICE_NAME secret..."
+        echo "   SERVICE_NAME secret: ${SERVICE_NAME:+SET}${SERVICE_NAME:-NOT SET}"
+        echo "   Repository name: ${{ github.event.repository.name }}"
+        echo "   Repository owner: ${{ github.repository_owner }}"
+        
+        if [ -n "${{ secrets.SERVICE_NAME }}" ]; then
+          echo "✅ SERVICE_NAME secret is set to: ${{ secrets.SERVICE_NAME }}"
+        else
+          echo "⚠️ SERVICE_NAME secret is NOT set"
+          echo "💡 Will fallback to repository name: ${{ github.event.repository.name }}"
+        fi
+        
     - name: Update image tag
       run: |
         cd manifests
@@ -301,9 +315,27 @@ jobs:
         SERVICE="${{ secrets.SERVICE_NAME }}"
         if [ -z "$SERVICE" ]; then
           SERVICE="${{ github.event.repository.name }}"
+          echo "⚠️ SERVICE_NAME secret not set, using repo name: $SERVICE"
+        else
+          echo "✅ Using SERVICE_NAME secret: $SERVICE"
         fi
-        echo "Using service name: $SERVICE"
+        
+        # Validate that the service folder exists
+        SERVICE_DIR="services/$SERVICE"
+        if [ ! -d "$SERVICE_DIR" ]; then
+          echo "❌ Service directory not found: $SERVICE_DIR"
+          echo "💡 Please ensure the service was created properly with the correct name"
+          exit 1
+        fi
+        
         FILE="services/$SERVICE/k8s/deployment.yaml"
+        if [ ! -f "$FILE" ]; then
+          echo "❌ Deployment file not found: $FILE"
+          echo "💡 Please ensure the service was created properly"
+          exit 1
+        fi
+        
+        echo "📁 Found service files in: $SERVICE_DIR"
         # Cập nhật image với tag duy nhất theo commit
         sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:main-${{ github.sha }}|g" "$FILE"
         # Cập nhật timestamp annotation để đảm bảo podTemplateSpec khác → rollout
@@ -317,7 +349,19 @@ jobs:
         SERVICE="${{ secrets.SERVICE_NAME }}"
         if [ -z "$SERVICE" ]; then
           SERVICE="${{ github.event.repository.name }}"
+          echo "⚠️ SERVICE_NAME secret not set, using repo name: $SERVICE"
+        else
+          echo "✅ Using SERVICE_NAME secret: $SERVICE"
         fi
+        
+        # Validate that the service folder exists
+        SERVICE_DIR="services/$SERVICE"
+        if [ ! -d "$SERVICE_DIR" ]; then
+          echo "❌ Service directory not found: $SERVICE_DIR"
+          echo "💡 Please ensure the service was created properly with the correct name"
+          exit 1
+        fi
+        
         ARGOCD_APP_FILE="apps/${SERVICE}-application.yaml"
         
         # Check if ArgoCD application already exists

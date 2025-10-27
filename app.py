@@ -694,24 +694,13 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             'ARGOCD_ADMIN_PASSWORD': ARGOCD_ADMIN_PASSWORD
         }
         
-        # Add SERVICE_NAME if provided - use repo_name for CI/CD consistency
+        # Add SERVICE_NAME if provided - use UI service name
         if service_name:
-            # Extract repo name from repo_url for SERVICE_NAME secret
-            try:
-                import re
-                match = re.search(r'github\.com/([^/]+)/([^/]+)', repo_url)
-                if match:
-                    repo_name = match.group(2)
-                    if repo_name.endswith('.git'):
-                        repo_name = repo_name[:-4]
-                    updates['SERVICE_NAME'] = repo_name
-                    print(f"   SERVICE_NAME set to repo name: {repo_name}")
-                else:
-                    updates['SERVICE_NAME'] = service_name
-                    print(f"   SERVICE_NAME set to service name: {service_name}")
-            except:
-                updates['SERVICE_NAME'] = service_name
-                print(f"   SERVICE_NAME set to service name (fallback): {service_name}")
+            updates['SERVICE_NAME'] = service_name
+            print(f"   SERVICE_NAME set to UI service name: {service_name}")
+            print(f"   This will be used by CI/CD to find folder: services/{service_name}/k8s/")
+        else:
+            print(f"   ⚠️ No service_name provided - SERVICE_NAME secret will not be set")
         
         # Track results
         results = {}
@@ -1866,9 +1855,9 @@ def create_service():
         except:
             repo_name = service_name  # Fallback to service_name
         
-        # Override repo_b_path to use GitHub repo name for consistency
-        repo_b_path = f"services/{repo_name}/k8s"
-        print(f"🔧 Using repo_b_path: {repo_b_path} (based on GitHub repo name: {repo_name})")
+        # Override repo_b_path to use UI service name for consistency
+        repo_b_path = f"services/{service_name}/k8s"
+        print(f"🔧 Using repo_b_path: {repo_b_path} (based on UI service name: {service_name})")
         
         db_service_data = {
             'name': service_name,
@@ -3023,14 +3012,14 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
 
         # Prepare destination path and copy template manifests
         
-        # Create services/{REPO_A_NAME}/k8s structure with YAML files
-        # Use GitHub repository name for folder structure (not service name from UI)
+        # Create services/{SERVICE_NAME}/k8s structure with YAML files
+        # Use UI service name for folder structure
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-            service_dir = os.path.join(clone_dir, 'services', repo_a_name)
+            service_dir = os.path.join(clone_dir, 'services', service_name)
         else:
             # Railway deployment - create temporary directory
-            service_dir = os.path.join(tmpdir, 'services', repo_a_name)
+            service_dir = os.path.join(tmpdir, 'services', service_name)
             print(f"DEBUG: Creating service directory: {service_dir}")
         
         k8s_dir = os.path.join(service_dir, 'k8s')
@@ -3871,8 +3860,8 @@ def deploy_from_existing_repository():
         print(f"✅ Successfully added files: {add_files_result.get('added_files', [])}")
         
         # Generate Kubernetes manifests in Repo B
-        # Use repo_name for folder structure (not service_name from UI)
-        repo_b_path = f"services/{repo_name}/k8s"
+        # Use UI service name for folder structure
+        repo_b_path = f"services/{service_name}/k8s"
         repo_b_res = generate_repo_b(service_data, repo_url, repo_b_url, repo_b_path, namespace, 'latest', github_token)
         
         if not repo_b_res['success']:
