@@ -1021,15 +1021,26 @@ def get_services():
                                                  headers=headers, timeout=10, verify=False)
                         if app_response.status_code == 200:
                             app_data = app_response.json()
-                            # Create mock deployment data for compatibility
+                            # Get resource info from MongoDB service document directly
+                            cpu_request = svc.get('cpu_request')
+                            memory_request = svc.get('memory_request')
+                            cpu_limit = svc.get('cpu_limit')
+                            memory_limit = svc.get('memory_limit')
+                            
                             deployment = {
                                 'spec': {
                                     'template': {
                                         'spec': {
                                             'containers': [{
                                                 'resources': {
-                                                    'requests': {'cpu': '100m', 'memory': '128Mi'},
-                                                    'limits': {'cpu': '500m', 'memory': '512Mi'}
+                                                    'requests': {
+                                                        'cpu': cpu_request or 'N/A',
+                                                        'memory': memory_request or 'N/A'
+                                                    },
+                                                    'limits': {
+                                                        'cpu': cpu_limit or 'N/A',
+                                                        'memory': memory_limit or 'N/A'
+                                                    }
                                                 }
                                             }]
                                         }
@@ -1042,8 +1053,32 @@ def get_services():
                             sync_status = 'Unknown'
                     else:
                         print(f"⚠️ Could not get ArgoCD session token for {service_name}")
-                        health_status = 'Unknown'
-                        sync_status = 'Unknown'
+                        # Get resource info from MongoDB service document directly as fallback
+                        cpu_request = svc.get('cpu_request')
+                        memory_request = svc.get('memory_request')
+                        cpu_limit = svc.get('cpu_limit')
+                        memory_limit = svc.get('memory_limit')
+                        
+                        deployment = {
+                            'spec': {
+                                'template': {
+                                    'spec': {
+                                        'containers': [{
+                                            'resources': {
+                                                'requests': {
+                                                    'cpu': cpu_request or 'N/A',
+                                                    'memory': memory_request or 'N/A'
+                                                },
+                                                'limits': {
+                                                    'cpu': cpu_limit or 'N/A',
+                                                    'memory': memory_limit or 'N/A'
+                                                }
+                                            }
+                                        }]
+                                    }
+                                }
+                            }
+                        }
                 else:
                     subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
                     deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
