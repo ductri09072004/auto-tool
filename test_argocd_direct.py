@@ -8,7 +8,7 @@ def test_argocd_api():
     print("🔍 Testing ArgoCD API directly...")
     
     # ArgoCD configuration
-    argocd_url = "https://711b2dae39a6.ngrok-free.app"
+    argocd_url = "https://f6dde8d941f5.ngrok-free.app"
     admin_password = "IG42zHWiFya1XbaR"
     
     try:
