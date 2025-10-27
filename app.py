@@ -1840,8 +1840,20 @@ def create_service():
         # ArgoCD plugin will later read from MongoDB and create YAML files
         print(f"DEBUG: Creating service {service_name} with form data")
         
+        # Extract repo name from repo_url for webhook mapping
+        try:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(repo_url)
+            repo_path = parsed_url.path.strip('/')
+            if repo_path.endswith('.git'):
+                repo_path = repo_path[:-4]
+            repo_name = repo_path.split('/')[-1] if '/' in repo_path else repo_path
+        except:
+            repo_name = service_name  # Fallback to service_name
+        
         db_service_data = {
             'name': service_name,
+            'repo_name': repo_name,  # Add repo_name for webhook mapping
             'namespace': namespace,
             'port': int(detected_port),
             'description': description,
@@ -4068,35 +4080,44 @@ def github_webhook():
                 
                 print(f"Processing webhook: {repo_name} pushed to {branch} (commit: {commit_short})")
                 
-                # Check if service exists in MongoDB
+                # Check if service exists in MongoDB by repo_name
                 try:
-                    service_data = service_manager.get_service_data(repo_name)
+                    # First try to find by repo_name (for webhook mapping)
+                    service_data = service_manager.mongo_ops.db.services.find_one({'repo_name': repo_name})
                     if not service_data:
-                        print(f"Service {repo_name} not found in MongoDB")
-                        return jsonify({
-                            'success': False,
-                            'message': f'Service {repo_name} not found in database',
-                            'service_name': repo_name
-                        }), 404
+                        # Fallback: try to find by name (for backward compatibility)
+                        service_data = service_manager.get_service_data(repo_name)
+                        if not service_data:
+                            print(f"Service with repo_name {repo_name} not found in MongoDB")
+                            return jsonify({
+                                'success': False,
+                                'message': f'Service with repo_name {repo_name} not found in database',
+                                'repo_name': repo_name
+                            }), 404
+                    
+                    # Get the actual service_name from the found service
+                    actual_service_name = service_data.get('name', repo_name)
+                    print(f"Found service: {actual_service_name} (repo_name: {repo_name})")
                     
                     print(f"Service {repo_name} found in MongoDB")
                     
                     # Update image tag in MongoDB
                     service_manager.mongo_ops.db.services.update_one(
-                        {'name': repo_name},
+                        {'name': actual_service_name},  # Use actual service name
                         {'$set': {
                             'metadata.image_tag': image_tag,
                             'metadata.last_commit': commit_sha,
                             'updated_at': datetime.utcnow().isoformat()
                         }}
                     )
-                    print(f"Updated image tag to {image_tag} for {repo_name}")
+                    print(f"Updated image tag to {image_tag} for {actual_service_name}")
                     
                     # Log the event
                     service_manager.mongo_ops.db.service_events.insert_one({
-                        'service_name': repo_name,
+                        'service_name': actual_service_name,  # Use actual service name
                         'event_type': 'github_push',
                         'event_data': {
+                            'repo_name': repo_name,
                             'commit_sha': commit_sha,
                             'image_tag': image_tag,
                             'branch': branch,
@@ -4104,12 +4125,12 @@ def github_webhook():
                         },
                         'timestamp': datetime.utcnow().isoformat()
                     })
-                    print(f"Logged event for {repo_name}")
+                    print(f"Logged event for {actual_service_name} (repo: {repo_name})")
                     
                     # Generate YAML templates from MongoDB data
                     try:
-                        print(f"Generating YAML templates from MongoDB for {repo_name}...")
-                        yaml_generation_success = service_manager.generate_yaml_from_mongo(repo_name)
+                        print(f"Generating YAML templates from MongoDB for {actual_service_name}...")
+                        yaml_generation_success = service_manager.generate_yaml_from_mongo(actual_service_name)
                         print(f"YAML generation result: {yaml_generation_success}")
                         
                         if yaml_generation_success:
