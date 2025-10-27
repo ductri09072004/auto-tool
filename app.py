@@ -112,7 +112,7 @@ def _check_argocd_application_status(service_name):
         print(f"❌ Error checking ArgoCD application status: {e}")
         return None
 
-def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
+def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace, repo_a_name=None):
     """Deploy ArgoCD Application via ArgoCD API instead of kubectl"""
     try:
         # Get ArgoCD server URL and token from config
@@ -138,6 +138,9 @@ def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
         if not argocd_token:
             return {'success': False, 'error': 'ARGOCD_TOKEN not configured and cannot get session token'}
         
+        # Use repo_a_name for path if provided, otherwise fallback to service_name
+        path_name = repo_a_name if repo_a_name else service_name
+        
         # Prepare application data
         app_data = {
             "metadata": {
@@ -150,7 +153,7 @@ def _deploy_argocd_application_via_api(service_name, repo_b_url, namespace):
                 "source": {
                     "repoURL": repo_b_url.replace('.git', ''),
                     "targetRevision": "HEAD",
-                    "path": f"services/{service_name}/k8s"
+                    "path": f"services/{path_name}/k8s"
                 },
                 "destination": {
                     "server": "https://kubernetes.default.svc",
@@ -3004,13 +3007,14 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
 
         # Prepare destination path and copy template manifests
         
-        # Create services/{SERVICE_NAME}/k8s structure with YAML files
+        # Create services/{REPO_A_NAME}/k8s structure with YAML files
+        # Use GitHub repository name for folder structure (not service name from UI)
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-            service_dir = os.path.join(clone_dir, 'services', service_name)
+            service_dir = os.path.join(clone_dir, 'services', repo_a_name)
         else:
             # Railway deployment - create temporary directory
-            service_dir = os.path.join(tmpdir, 'services', service_name)
+            service_dir = os.path.join(tmpdir, 'services', repo_a_name)
             print(f"DEBUG: Creating service directory: {service_dir}")
         
         k8s_dir = os.path.join(service_dir, 'k8s')
@@ -3550,7 +3554,17 @@ def recreate_yaml_from_mongo(service_name):
         # Extract required data for generate_repo_b
         repo_a_url = service_data.get('repo_url', f'https://github.com/ductri09072004/{service_name}.git')
         repo_b_url = service_data.get('metadata', {}).get('repo_b_url', 'https://github.com/ductri09072004/demo_fiss1_B.git')
-        repo_b_path = service_data.get('argocd_application', {}).get('path', f'services/{service_name}/k8s')
+        
+        # Extract repo name from repo_a_url for folder structure
+        from urllib.parse import urlparse
+        parsed = urlparse(repo_a_url)
+        path = parsed.path.lstrip('/')
+        if path.endswith('.git'):
+            path = path[:-4]
+        repo_a_name = path.split('/')[-1] if '/' in path else path
+        
+        # Use repo_a_name for folder structure, service_name for namespace
+        repo_b_path = f'services/{repo_a_name}/k8s'
         namespace = service_data.get('namespace', service_name)
         
         # Prepare service_data in the format expected by generate_repo_b
@@ -3579,7 +3593,7 @@ def recreate_yaml_from_mongo(service_name):
             formatted_service_data, 
             repo_a_url, 
             repo_b_url, 
-            repo_b_path, 
+            repo_b_path,  # This now uses repo_a_name for folder structure
             namespace, 
             image_tag  # Use actual image tag
         )
@@ -4142,7 +4156,7 @@ def github_webhook():
                             # Materialize YAML files into Repo B so ArgoCD can sync
                             try:
                                 print(f"Materializing YAML files to Repo B for {repo_name}...")
-                                materialize_response = recreate_yaml_from_mongo(repo_name)
+                                materialize_response = recreate_yaml_from_mongo(actual_service_name)
                                 if isinstance(materialize_response, dict):
                                     print(f"Materialize result: success={materialize_response.get('success')} error={materialize_response.get('error')}")
                                 else:
