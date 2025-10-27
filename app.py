@@ -1021,6 +1021,17 @@ def get_services():
                                                  headers=headers, timeout=10, verify=False)
                         if app_response.status_code == 200:
                             app_data = app_response.json()
+                            
+                            # Check if application has running pods (Health status must be Healthy)
+                            status = app_data.get('status', {})
+                            health = status.get('health', {}).get('status', 'Unknown')
+                            sync = status.get('sync', {}).get('status', 'Unknown')
+                            
+                            # Only show services with running pods (Healthy status)
+                            if health != 'Healthy':
+                                print(f"⏭️ Skipping {service_name}: Health status is {health} (no running pods)")
+                                continue
+                            
                             # Get resource info from MongoDB service document directly
                             cpu_request = svc.get('cpu_request')
                             memory_request = svc.get('memory_request')
@@ -1053,36 +1064,34 @@ def get_services():
                             sync_status = 'Unknown'
                     else:
                         print(f"⚠️ Could not get ArgoCD session token for {service_name}")
-                        # Get resource info from MongoDB service document directly as fallback
-                        cpu_request = svc.get('cpu_request')
-                        memory_request = svc.get('memory_request')
-                        cpu_limit = svc.get('cpu_limit')
-                        memory_limit = svc.get('memory_limit')
-                        
-                        deployment = {
-                            'spec': {
-                                'template': {
-                                    'spec': {
-                                        'containers': [{
-                                            'resources': {
-                                                'requests': {
-                                                    'cpu': cpu_request or 'N/A',
-                                                    'memory': memory_request or 'N/A'
-                                                },
-                                                'limits': {
-                                                    'cpu': cpu_limit or 'N/A',
-                                                    'memory': memory_limit or 'N/A'
-                                                }
-                                            }
-                                        }]
-                                    }
-                                }
-                            }
-                        }
+                        # Skip service if we can't verify pod status
+                        print(f"⏭️ Skipping {service_name}: Cannot verify pod status (ArgoCD API unavailable)")
+                        continue
                 else:
-                    subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
-                    deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
-                    deployment = json.loads(deploy_result.stdout)
+                    # Local environment: check if pods are running
+                    try:
+                        # Check if namespace exists
+                        subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
+                        
+                        # Check if deployment exists and has running pods
+                        deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
+                        deployment = json.loads(deploy_result.stdout)
+                        
+                        # Check pod status
+                        pods_result = subprocess.run(['kubectl', 'get', 'pods', '-n', service_name, '-l', f'app={service_name}', '--no-headers'], capture_output=True, text=True)
+                        if pods_result.returncode != 0 or not pods_result.stdout.strip():
+                            print(f"⏭️ Skipping {service_name}: No running pods found")
+                            continue
+                        
+                        # Check if any pods are running
+                        running_pods = [line for line in pods_result.stdout.strip().split('\n') if 'Running' in line]
+                        if not running_pods:
+                            print(f"⏭️ Skipping {service_name}: No pods in Running state")
+                            continue
+                            
+                    except subprocess.CalledProcessError as e:
+                        print(f"⏭️ Skipping {service_name}: Deployment not found or error - {e}")
+                        continue
 
                 cpu_request = 'N/A'
                 cpu_limit = 'N/A'
