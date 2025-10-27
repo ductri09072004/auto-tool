@@ -955,9 +955,40 @@ def get_services():
         db_services = service_manager.get_services() or []
         default_repo_url = DEFAULT_REPO_B_URL
 
+        # Get ArgoCD applications list first
+        argocd_apps = set()
+        if is_railway_environment():
+            try:
+                session_token = _get_argocd_session_token()
+                if session_token:
+                    headers = {
+                        'Authorization': f'Bearer {session_token}',
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                    apps_response = requests.get(f"{ARGOCD_SERVER_URL}/api/v1/applications", 
+                                               headers=headers, timeout=15, verify=False)
+                    if apps_response.status_code == 200:
+                        apps_data = apps_response.json()
+                        for app in apps_data.get('items', []):
+                            app_name = app.get('metadata', {}).get('name')
+                            if app_name:
+                                argocd_apps.add(app_name)
+                        print(f"✅ Found {len(argocd_apps)} applications in ArgoCD")
+                    else:
+                        print(f"⚠️ Could not get ArgoCD applications list: {apps_response.status_code}")
+                else:
+                    print("⚠️ Could not get ArgoCD session token")
+            except Exception as e:
+                print(f"⚠️ Error getting ArgoCD applications: {e}")
+
         for svc in db_services:
             service_name = svc.get('name') or svc.get('service_name')
             if not service_name:
+                continue
+            
+            # Only show services that exist in both MongoDB and ArgoCD
+            if is_railway_environment() and argocd_apps and service_name not in argocd_apps:
+                print(f"⏭️ Skipping {service_name} - not found in ArgoCD")
                 continue
 
             port = int(svc.get('port') or 5001)
@@ -1006,9 +1037,13 @@ def get_services():
                                 }
                             }
                         else:
-                            raise Exception(f"ArgoCD API returned {app_response.status_code}")
+                            print(f"⚠️ ArgoCD API returned {app_response.status_code} for {service_name}")
+                            health_status = 'Unknown'
+                            sync_status = 'Unknown'
                     else:
-                        raise Exception("Could not get ArgoCD session token")
+                        print(f"⚠️ Could not get ArgoCD session token for {service_name}")
+                        health_status = 'Unknown'
+                        sync_status = 'Unknown'
                 else:
                     subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
                     deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
