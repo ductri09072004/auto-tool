@@ -107,11 +107,20 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
+        # Only use cache if package-lock.json exists
+        cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
         
     - name: Install Node.js dependencies
       if: needs.detect-stack.outputs.language == 'nodejs'
-      run: npm ci
+      run: |
+        # Use npm install if no package-lock.json, otherwise use npm ci
+        if [ -f "package-lock.json" ]; then
+          echo "Using npm ci with existing package-lock.json"
+          npm ci
+        else
+          echo "Using npm install (no package-lock.json found)"
+          npm install
+        fi
       
     - name: Run Node.js tests
       if: needs.detect-stack.outputs.language == 'nodejs'
