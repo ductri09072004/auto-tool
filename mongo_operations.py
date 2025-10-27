@@ -425,6 +425,7 @@ class MongoOperations:
             # Create complete service document with all information
             service_doc = {
                 'name': service_name,
+                'repo_name': service_data.get('repo_name', service_name),  # Add repo_name for webhook mapping
                 'namespace': service_data.get('namespace', service_name),
                 'port': service_data.get('port', 5001),
                 'description': service_data.get('description', f'Demo service {service_name}'),
@@ -517,6 +518,13 @@ class MongoOperations:
             
             # Insert/Update in services collection
             self.db.services.update_one({'name': service_name}, {'$set': service_doc}, upsert=True)
+            
+            # Also update existing services that might not have repo_name field
+            if 'repo_name' in service_data:
+                self.db.services.update_one(
+                    {'name': service_name, 'repo_name': {'$exists': False}}, 
+                    {'$set': {'repo_name': service_data['repo_name']}}
+                )
             
             # Add to service_events collection for logging
             self.db.service_events.insert_one({
@@ -880,6 +888,51 @@ metadata:
     managed-by: dev-portal"""
         
         return namespace_yaml
+
+    def migrate_services_add_repo_name(self):
+        """Migrate existing services to add repo_name field"""
+        try:
+            # Find services without repo_name field
+            services_without_repo_name = list(self.db.services.find({'repo_name': {'$exists': False}}))
+            
+            print(f"Found {len(services_without_repo_name)} services without repo_name field")
+            
+            for service in services_without_repo_name:
+                service_name = service.get('name')
+                repo_url = service.get('repo_url', '')
+                
+                if service_name and repo_url:
+                    # Extract repo name from repo_url
+                    try:
+                        from urllib.parse import urlparse
+                        parsed_url = urlparse(repo_url)
+                        repo_path = parsed_url.path.strip('/')
+                        if repo_path.endswith('.git'):
+                            repo_path = repo_path[:-4]
+                        repo_name = repo_path.split('/')[-1] if '/' in repo_path else repo_path
+                        
+                        # Update service with repo_name
+                        self.db.services.update_one(
+                            {'name': service_name}, 
+                            {'$set': {'repo_name': repo_name}}
+                        )
+                        print(f"Updated service {service_name} with repo_name: {repo_name}")
+                        
+                    except Exception as e:
+                        print(f"Failed to extract repo_name for {service_name}: {e}")
+                        # Fallback: use service_name as repo_name
+                        self.db.services.update_one(
+                            {'name': service_name}, 
+                            {'$set': {'repo_name': service_name}}
+                        )
+                        print(f"Fallback: Updated service {service_name} with repo_name: {service_name}")
+            
+            print("Migration completed")
+            return True
+            
+        except Exception as e:
+            print(f"Migration failed: {e}")
+            return False
 
     def _generate_secret_yaml(self, service_data):
         """Generate secret.yaml from MongoDB data"""

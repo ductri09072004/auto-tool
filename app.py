@@ -3535,6 +3535,28 @@ def stop_port_forward_endpoint():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/migrate-services', methods=['POST'])
+def migrate_services():
+    """Migrate existing services to add repo_name field"""
+    try:
+        result = service_manager.mongo_ops.migrate_services_add_repo_name()
+        if result:
+            return jsonify({
+                'success': True,
+                'message': 'Services migrated successfully',
+                'note': 'All existing services now have repo_name field for webhook mapping'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Migration failed'
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/port-forward/status', methods=['GET'])
 def port_forward_status():
     """Check port-forward status"""
@@ -4164,8 +4186,8 @@ def github_webhook():
                             print(f"YAML templates generated successfully for {repo_name}")
                             # Materialize YAML files into Repo B so ArgoCD can sync
                             try:
-                                print(f"Materializing YAML files to Repo B for {repo_name}...")
-                                materialize_response = recreate_yaml_from_mongo(repo_name)
+                                print(f"Materializing YAML files to Repo B for {actual_service_name}...")
+                                materialize_response = recreate_yaml_from_mongo(actual_service_name)
                                 if isinstance(materialize_response, dict):
                                     print(f"Materialize result: success={materialize_response.get('success')} error={materialize_response.get('error')}")
                                 else:
