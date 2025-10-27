@@ -297,8 +297,11 @@ jobs:
     - name: Update image tag
       run: |
         cd manifests
-        # Use GitHub repository name as service name
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
         echo "Using service name: $SERVICE"
         FILE="services/$SERVICE/k8s/deployment.yaml"
         # Cập nhật image với tag duy nhất theo commit
