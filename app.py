@@ -944,6 +944,7 @@ def argocd_status():
 def get_services():
     """Get list of services from MongoDB, enrich with K8s + health metrics."""
     try:
+        from config import ARGOCD_SERVER_URL
         services = []
 
         db_services = service_manager.get_services() or []
@@ -971,9 +972,42 @@ def get_services():
                 pass
 
             try:
-                subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
-                deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
-                deployment = json.loads(deploy_result.stdout)
+                if is_railway_environment():
+                    # Use ArgoCD API instead of kubectl on Railway
+                    session_token = _get_argocd_session_token()
+                    if session_token:
+                        # Get application info from ArgoCD API
+                        headers = {
+                            'Authorization': f'Bearer {session_token}',
+                            'ngrok-skip-browser-warning': 'true'
+                        }
+                        app_response = requests.get(f"{ARGOCD_SERVER_URL}/api/v1/applications/{service_name}", 
+                                                 headers=headers, timeout=10, verify=False)
+                        if app_response.status_code == 200:
+                            app_data = app_response.json()
+                            # Create mock deployment data for compatibility
+                            deployment = {
+                                'spec': {
+                                    'template': {
+                                        'spec': {
+                                            'containers': [{
+                                                'resources': {
+                                                    'requests': {'cpu': '100m', 'memory': '128Mi'},
+                                                    'limits': {'cpu': '500m', 'memory': '512Mi'}
+                                                }
+                                            }]
+                                        }
+                                    }
+                                }
+                            }
+                        else:
+                            raise Exception(f"ArgoCD API returned {app_response.status_code}")
+                    else:
+                        raise Exception("Could not get ArgoCD session token")
+                else:
+                    subprocess.run(['kubectl', 'get', 'namespace', service_name], capture_output=True, text=True, check=True)
+                    deploy_result = subprocess.run(['kubectl', 'get', 'deployment', service_name, '-n', service_name, '-o', 'json'], capture_output=True, text=True, check=True)
+                    deployment = json.loads(deploy_result.stdout)
 
                 cpu_request = 'N/A'
                 cpu_limit = 'N/A'
@@ -1025,15 +1059,32 @@ def get_services():
 
                 try:
                     if is_railway_environment():
-                        # Skip kubectl check on Railway
-                        health_status = 'Unknown'
-                        sync_status = 'Unknown'
+                        # Use ArgoCD API instead of kubectl on Railway
+                        session_token = _get_argocd_session_token()
+                        if session_token:
+                            headers = {
+                                'Authorization': f'Bearer {session_token}',
+                                'ngrok-skip-browser-warning': 'true'
+                            }
+                            app_response = requests.get(f"{ARGOCD_SERVER_URL}/api/v1/applications/{service_name}", 
+                                                       headers=headers, timeout=10, verify=False)
+                            if app_response.status_code == 200:
+                                argocd_app = app_response.json()
+                                health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
+                                sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
+                            else:
+                                health_status = 'Unknown'
+                                sync_status = 'Unknown'
+                        else:
+                            health_status = 'Unknown'
+                            sync_status = 'Unknown'
                     else:
                         argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'], capture_output=True, text=True, check=True)
                         argocd_app = json.loads(argocd_result.stdout)
                         health_status = argocd_app['status'].get('health', {}).get('status', 'Unknown')
                         sync_status = argocd_app['status'].get('sync', {}).get('status', 'Unknown')
-                except subprocess.CalledProcessError:
+                except Exception as e:
+                    print(f"Warning: Could not get ArgoCD status for {service_name}: {e}")
                     health_status = 'Unknown'
                     sync_status = 'Unknown'
 

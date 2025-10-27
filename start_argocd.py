@@ -64,7 +64,7 @@ def start_port_forward():
             print()
             print("📋 Configuration:")
             print("   Local URL: http://localhost:8080")
-            print("   ngrok URL: https://e509ac06fcdf.ngrok-free.app")
+            print("   ngrok URL: https://711b2dae39a6.ngrok-free.app")
             print()
             print("⚠️  Important:")
             print("   - Keep this terminal window open")
