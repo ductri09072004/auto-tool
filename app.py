@@ -3004,13 +3004,14 @@ def generate_repo_b(service_data, repo_a_url: str, repo_b_url: str, repo_b_path:
 
         # Prepare destination path and copy template manifests
         
-        # Create services/{SERVICE_NAME}/k8s structure with YAML files
+        # Create services/{REPO_A_NAME}/k8s structure with YAML files
+        # Use GitHub repository name for folder structure (not service name from UI)
         if has_git_command() and not is_railway_environment():
             # Local development - use cloned directory
-            service_dir = os.path.join(clone_dir, 'services', service_name)
+            service_dir = os.path.join(clone_dir, 'services', repo_a_name)
         else:
             # Railway deployment - create temporary directory
-            service_dir = os.path.join(tmpdir, 'services', service_name)
+            service_dir = os.path.join(tmpdir, 'services', repo_a_name)
             print(f"DEBUG: Creating service directory: {service_dir}")
         
         k8s_dir = os.path.join(service_dir, 'k8s')
@@ -3161,7 +3162,7 @@ spec:
             files_to_push = {}
             
             # Walk through the service directory and collect all files
-            service_source_dir = os.path.join(tmpdir, 'services', service_name)
+            service_source_dir = os.path.join(tmpdir, 'services', repo_a_name)
             print(f"DEBUG: Looking for files in {service_source_dir}")
             print(f"DEBUG: Directory exists: {os.path.exists(service_source_dir)}")
             
@@ -3411,7 +3412,7 @@ spec:
                             return
                         
                         # Check if service directory exists
-                        service_path = f"services/{service_name}/k8s"
+                        service_path = f"services/{repo_a_name}/k8s"
                         full_service_path = os.path.join(clone_dir, service_path)
                         
                         if not os.path.exists(full_service_path):
@@ -3445,7 +3446,7 @@ spec:
                             print(f"Deleted empty k8s directory")
                         
                         # Check if services directory is empty
-                        service_dir = os.path.join(clone_dir, 'services', service_name)
+                        service_dir = os.path.join(clone_dir, 'services', repo_a_name)
                         if os.path.exists(service_dir) and not os.listdir(service_dir):
                             os.rmdir(service_dir)
                             print(f"Deleted empty service directory")
@@ -3838,7 +3839,8 @@ def deploy_from_existing_repository():
         print(f"✅ Successfully added files: {add_files_result.get('added_files', [])}")
         
         # Generate Kubernetes manifests in Repo B
-        repo_b_path = f"services/{service_name}/k8s"
+        # Use repo_name for folder structure (not service_name from UI)
+        repo_b_path = f"services/{repo_name}/k8s"
         repo_b_res = generate_repo_b(service_data, repo_url, repo_b_url, repo_b_path, namespace, 'latest', github_token)
         
         if not repo_b_res['success']:
