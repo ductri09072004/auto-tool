@@ -625,7 +625,7 @@ def _encrypt_secret(public_key: str, secret_value: str) -> str:
     encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
     return encoding.Base64Encoder().encode(encrypted).decode("utf-8")
 
-def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token: str = None) -> bool:
+def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token: str = None, service_name: str = None) -> bool:
     """Ensure GHCR_TOKEN, MANIFESTS_REPO_TOKEN, and ARGOCD_WEBHOOK_URL exist in repo secrets."""
     try:
         parsed = urlparse(repo_url)
@@ -693,6 +693,10 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             'ARGOCD_SERVER_URL': ARGOCD_SERVER_URL,
             'ARGOCD_ADMIN_PASSWORD': ARGOCD_ADMIN_PASSWORD
         }
+        
+        # Add SERVICE_NAME if provided
+        if service_name:
+            updates['SERVICE_NAME'] = service_name
         
         # Track results
         results = {}
@@ -1722,7 +1726,7 @@ def create_service():
             print(f"Repository URL: {repo_url}")
             print(f"GitHub token: {'SET' if github_token else 'NOT SET'}")
             print(f"Manifests token: {'SET' if manifests_token else 'NOT SET'}")
-            secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token)
+            secrets_result = ensure_repo_secrets(repo_url, github_token, manifests_token, service_name)
             print(f"Secrets result: {secrets_result}")
             if not secrets_result:
                 print("⚠️ Warning: Failed to set repository secrets. CI/CD may fail on first run.")

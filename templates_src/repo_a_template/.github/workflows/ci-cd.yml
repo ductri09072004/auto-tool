@@ -166,7 +166,12 @@ jobs:
     - name: Update image tag
       run: |
         cd manifests
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
+        echo "Using service name: $SERVICE"
         FILE="services/$SERVICE/k8s/deployment.yaml"
         # Cập nhật image với tag duy nhất theo commit
         sed -i "s|image: ghcr.io/.*/.*:.*|image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:main-${{ github.sha }}|g" "$FILE"
@@ -177,7 +182,11 @@ jobs:
     - name: Create ArgoCD Application (if not exists)
       run: |
         cd manifests
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
         ARGOCD_APP_FILE="apps/${SERVICE}-application.yaml"
         
         # Check if ArgoCD application already exists
@@ -235,13 +244,21 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add .
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
         git commit -m "Update $SERVICE image to ${{ github.sha }}" || exit 0
         git push
         
     - name: Deploy ArgoCD Application via API
       run: |
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
         ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
         ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
         
@@ -334,7 +351,11 @@ jobs:
         
     - name: Trigger ArgoCD Sync
       run: |
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
         ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
         ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
         
@@ -390,7 +411,11 @@ jobs:
         
     - name: Wait for ArgoCD Healthy and Cleanup YAML
       run: |
-        SERVICE="${{ github.event.repository.name }}"
+        # Use SERVICE_NAME secret if available, otherwise fallback to repo name
+        SERVICE="${{ secrets.SERVICE_NAME }}"
+        if [ -z "$SERVICE" ]; then
+          SERVICE="${{ github.event.repository.name }}"
+        fi
         ARGOCD_SERVER="${{ secrets.ARGOCD_SERVER_URL }}"
         ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
         
