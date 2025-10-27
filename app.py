@@ -694,9 +694,24 @@ def ensure_repo_secrets(repo_url: str, github_token: str = None, manifests_token
             'ARGOCD_ADMIN_PASSWORD': ARGOCD_ADMIN_PASSWORD
         }
         
-        # Add SERVICE_NAME if provided
+        # Add SERVICE_NAME if provided - use repo_name for CI/CD consistency
         if service_name:
-            updates['SERVICE_NAME'] = service_name
+            # Extract repo name from repo_url for SERVICE_NAME secret
+            try:
+                import re
+                match = re.search(r'github\.com/([^/]+)/([^/]+)', repo_url)
+                if match:
+                    repo_name = match.group(2)
+                    if repo_name.endswith('.git'):
+                        repo_name = repo_name[:-4]
+                    updates['SERVICE_NAME'] = repo_name
+                    print(f"   SERVICE_NAME set to repo name: {repo_name}")
+                else:
+                    updates['SERVICE_NAME'] = service_name
+                    print(f"   SERVICE_NAME set to service name: {service_name}")
+            except:
+                updates['SERVICE_NAME'] = service_name
+                print(f"   SERVICE_NAME set to service name (fallback): {service_name}")
         
         # Track results
         results = {}
@@ -1850,6 +1865,10 @@ def create_service():
             repo_name = repo_path.split('/')[-1] if '/' in repo_path else repo_path
         except:
             repo_name = service_name  # Fallback to service_name
+        
+        # Override repo_b_path to use GitHub repo name for consistency
+        repo_b_path = f"services/{repo_name}/k8s"
+        print(f"🔧 Using repo_b_path: {repo_b_path} (based on GitHub repo name: {repo_name})")
         
         db_service_data = {
             'name': service_name,
@@ -3772,6 +3791,19 @@ def deploy_from_existing_repository():
         memory_limit = data.get('memory_limit', '256Mi')
         repo_b_url = data.get('repo_b_url', DEFAULT_REPO_B_URL)
         namespace = data.get('namespace', service_name)
+        
+        # Extract repo name from repo_url for consistency
+        try:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(repo_url)
+            repo_path = parsed_url.path.strip('/')
+            if repo_path.endswith('.git'):
+                repo_path = repo_path[:-4]
+            repo_name = repo_path.split('/')[-1] if '/' in repo_path else repo_path
+        except:
+            repo_name = service_name  # Fallback to service_name
+        
+        print(f"🔧 Using repo_name: {repo_name} (extracted from GitHub URL)")
         
         # Validate GitHub token
         try:
