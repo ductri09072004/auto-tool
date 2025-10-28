@@ -559,7 +559,7 @@ class MongoOperations:
             collections_to_clean = [
                 'services', 'service_events', 'deployments', 'k8s_services', 
                 'configmaps', 'hpas', 'ingresses', 'namespaces', 'secrets', 
-                'argocd_applications', 'manifest_versions'
+                'argocd_applications', 'manifest_versions', 'yaml_templates'
             ]
             
             for collection_name in collections_to_clean:
