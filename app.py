@@ -1663,19 +1663,33 @@ def create_service():
             return jsonify({'error': f'Failed to validate GitHub token: {str(e)}'}), 400
         
         # Kubernetes configuration
-        replicas = request.form.get('replicas', '3')
-        min_replicas = request.form.get('min_replicas', '2')
-        max_replicas = request.form.get('max_replicas', '10')
-        cpu_request = request.form.get('cpu_request', '100m')
-        cpu_limit = request.form.get('cpu_limit', '200m')
-        memory_request = request.form.get('memory_request', '128Mi')
-        memory_limit = request.form.get('memory_limit', '256Mi')
+        replicas = request.form.get('replicas', '2')
+        min_replicas = request.form.get('min_replicas', '1')
+        max_replicas = request.form.get('max_replicas', '5')
+        cpu_request = request.form.get('cpu_request', '50m')
+        cpu_limit = request.form.get('cpu_limit', '100m')
+        memory_request = request.form.get('memory_request', '64Mi')
+        memory_limit = request.form.get('memory_limit', '128Mi')
         
         # Validate input
         if not service_name:
             return jsonify({'error': 'Service name is required'}), 400
         if not repo_url:
             return jsonify({'error': 'GitHub repo URL is required'}), 400
+        # Validate replicas constraints (server-side)
+        try:
+            replicas_i = int(replicas)
+            min_i = int(min_replicas)
+            max_i = int(max_replicas)
+        except Exception:
+            return jsonify({'error': 'Replicas values must be integers'}), 400
+
+        if max_i > 5:
+            return jsonify({'error': 'Max Replicas cannot be greater than 5'}), 400
+        if min_i < 1:
+            return jsonify({'error': 'Min Replicas must be at least 1'}), 400
+        if not (min_i <= replicas_i <= max_i):
+            return jsonify({'error': 'Invalid replicas: require Min <= Number of Pods <= Max'}), 400
         # If Repo B URL not provided, use default
         if not repo_b_url:
             repo_b_url = DEFAULT_REPO_B_URL
@@ -1704,9 +1718,9 @@ def create_service():
             'service_name': service_name,
             'description': description,
             'port': detected_port,
-            'replicas': replicas,
-            'min_replicas': min_replicas,
-            'max_replicas': max_replicas,
+            'replicas': replicas_i,
+            'min_replicas': min_i,
+            'max_replicas': max_i,
             'cpu_request': cpu_request,
             'cpu_limit': cpu_limit,
             'memory_request': memory_request,

@@ -211,7 +211,7 @@
                                             Number of Pods (Replicas)
                                         </label>
                                         <input type="number" class="form-control" id="replicas" name="replicas" 
-                                               value="3" min="1" max="10">
+                                               value="3" min="1" max="5">
                                         <small class="text-muted">Initial pod instances</small>
                                     </div>
                                     <div class="col-md-4">
@@ -229,7 +229,7 @@
                                             Max Replicas (HPA)
                                         </label>
                                         <input type="number" class="form-control" id="max_replicas" name="max_replicas" 
-                                               value="10" min="5" max="20">
+                                               value="5" min="1" max="5">
                                         <small class="text-muted">Maximum pods for autoscaling</small>
                                     </div>
                                 </div>
@@ -397,9 +397,30 @@
             }
         });
 
+        // Basic client-side validation for replicas
+        function validateReplicas() {
+            const replicas = parseInt(document.getElementById('replicas').value || '0');
+            const minR = parseInt(document.getElementById('min_replicas').value || '0');
+            const maxR = parseInt(document.getElementById('max_replicas').value || '0');
+            if (maxR > 5) {
+                alert('Max Replicas tối đa là 5');
+                return false;
+            }
+            if (minR < 1) {
+                alert('Min Replicas phải >= 1');
+                return false;
+            }
+            if (!(minR <= replicas && replicas <= maxR)) {
+                alert('Giá trị không hợp lệ: yêu cầu Min <= Number of Pods <= Max');
+                return false;
+            }
+            return true;
+        }
+
         // Form submission
         document.getElementById('serviceForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            if (!validateReplicas()) { return; }
             
             const form = e.target;
             const submitBtn = form.querySelector('button[type="submit"]');
