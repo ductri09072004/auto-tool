@@ -1440,155 +1440,87 @@ def read_service_info(service_name, k8s_path):
 
 @app.route('/api/services/<service_name>', methods=['DELETE'])
 def delete_service(service_name):
-    """Delete a service"""
+    """Delete a service without kubectl: Repo B YAML, ArgoCD app, and DB."""
     try:
-        # 1) Delete ArgoCD application (remove finalizers if blocking)
-        try:
-            subprocess.run(['kubectl', 'delete', 'application', service_name, '-n', 'argocd'], check=True)
-        except subprocess.CalledProcessError:
-            # try remove finalizers then delete again
-            try:
-                subprocess.run([
-                    'kubectl','patch','application',service_name,'-n','argocd',
-                    "--type","merge","-p","{\"metadata\":{\"finalizers\":null}}"
-                ], check=True)
-                subprocess.run(['kubectl', 'delete', 'application', service_name, '-n', 'argocd'], check=False)
-            except subprocess.CalledProcessError:
-                pass
+        step_results = {
+            'repo_b_yaml_deleted': False,
+            'argocd_app_deleted': False,
+            'database_deleted': False,
+            'errors': []
+        }
 
-        # 2) Proactively delete namespaced resources that often block deletion
+        # Find Repo B URL from DB (fallback to DEFAULT_REPO_B_URL)
         try:
-            resource_groups = [
-                ['deployment','statefulset','daemonset','replicaset','pod'],
-                ['service','ingress','endpoints'],
-                ['configmap','secret','serviceaccount'],
-                ['job','cronjob','hpa'],
-                ['pvc']
-            ]
-            for group in resource_groups:
-                subprocess.run(['kubectl','delete',*group,'--all','-n',service_name,'--ignore-not-found'], check=False, capture_output=True, text=True)
-
-            # Force delete any remaining pods
-            subprocess.run(['kubectl','delete','pod','--all','-n',service_name,'--grace-period=0','--force','--ignore-not-found'], check=False, capture_output=True, text=True)
-            # Extra sweep: delete all built-in resources regardless of label
-            subprocess.run(['kubectl','delete','all','--all','-n',service_name,'--ignore-not-found','--wait=false'], check=False, capture_output=True, text=True)
-            subprocess.run(['kubectl','delete','pvc','--all','-n',service_name,'--ignore-not-found','--wait=false'], check=False, capture_output=True, text=True)
-        except Exception:
-            pass
-
-        # 3) Delete namespace (remove finalizers if stuck terminating)
-        try:
-            subprocess.run(['kubectl', 'delete', 'namespace', service_name], check=True)
-        except subprocess.CalledProcessError:
-            # remove finalizers
-            try:
-                # fetch namespace json
-                ns_json = subprocess.run(['kubectl','get','ns',service_name,'-o','json'], capture_output=True, text=True, check=True)
-                data = json.loads(ns_json.stdout)
-                if 'spec' in data and isinstance(data.get('spec'), dict):
-                    data['spec'].pop('finalizers', None)
-                # write temp file
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-                tmp.write(json.dumps(data).encode('utf-8'))
-                tmp.close()
-                subprocess.run(['kubectl','replace','--raw',f'/api/v1/namespaces/{service_name}/finalize','-f',tmp.name], check=False)
-            except Exception:
-                pass
-        
-        # 4) Delete service folder from local Repo B
-        repo_b_path = os.path.join(REPO_B_SERVICES_PATH, service_name)
-        if os.path.exists(repo_b_path):
-            shutil.rmtree(repo_b_path)
-            # If local Repo B is a git repo, commit and push
-            try:
-                repo_b_root = os.path.dirname(REPO_B_SERVICES_PATH)
-                if os.path.isdir(os.path.join(repo_b_root, '.git')):
-                    subprocess.run(['git','add','-A'], cwd=repo_b_root, check=False)
-                    subprocess.run(['git','config','user.email','dev-portal@local'], cwd=repo_b_root, check=False)
-                    subprocess.run(['git','config','user.name','Dev Portal'], cwd=repo_b_root, check=False)
-                    subprocess.run(['git','commit','-m',f'chore: remove service {service_name}'], cwd=repo_b_root, check=False)
-                    subprocess.run(['git','push','origin','main'], cwd=repo_b_root, check=False)
-            except Exception:
-                pass
-
-        # 5) Delete service folder from remote Repo B (fallback to DEFAULT_REPO_B_URL when DB missing)
-        try:
-            # find service in DB to get repo_b_url
             services = service_manager.get_services()
             svc = next((s for s in services if s.get('name') == service_name), None)
             repo_b_url = (svc or {}).get('metadata', {}).get('repo_b_url', '') if svc else ''
             if not repo_b_url:
                 repo_b_url = DEFAULT_REPO_B_URL
-            if repo_b_url:
-                # Use GitHub Contents API to delete files in services/<service_name>/
-                def _parse_repo(url: str):
-                    try:
-                        u = urlparse(url)
-                        parts = [p for p in u.path.strip('/').split('/') if p]
-                        owner, repo = parts[0], parts[1]
-                        if repo.endswith('.git'):
-                            repo = repo[:-4]
-                        return owner, repo
-                    except Exception:
-                        return None, None
-                owner, repo = _parse_repo(repo_b_url)
-                if owner and repo:
-                    # Use default token for deletion since no token is passed from frontend
-                    token_to_use = MANIFESTS_REPO_TOKEN
-                    if token_to_use:
-                        headers = {
-                            'Accept': 'application/vnd.github+json',
-                            'Authorization': f'token {token_to_use}'
-                        }
-                    else:
-                        headers = {'Accept': 'application/vnd.github+json'}
-                    import base64
-                    def _get_sha(path_in_repo: str):
-                        r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}", headers=headers)
-                        if r.status_code == 200:
-                            j = r.json()
-                            if isinstance(j, dict):
-                                return j.get('sha')
-                        return None
-                    def _delete_file(path_in_repo: str, message: str):
-                        sha = _get_sha(path_in_repo)
-                        if not sha:
-                            return
-                        requests.delete(
-                            f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}",
-                            headers=headers,
-                            json={'message': message, 'sha': sha, 'branch': 'main'}
-                        )
-                    # Known files under k8s to remove
-                    files_to_delete = [
-                        f"services/{service_name}/k8s/deployment.yaml",
-                        f"services/{service_name}/k8s/service.yaml",
-                        f"services/{service_name}/k8s/configmap.yaml",
-                        f"services/{service_name}/k8s/hpa.yaml",
-                        f"services/{service_name}/k8s/ingress.yaml",
-                        f"services/{service_name}/k8s/ingress-gateway.yaml",
-                        f"services/{service_name}/k8s/namespace.yaml",
-                        f"services/{service_name}/k8s/secret.yaml",
-                        f"services/{service_name}/k8s/argocd-application.yaml",
-                    ]
-                    for p in files_to_delete:
-                        try:
-                            _delete_file(p, f"remove service {service_name}")
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-        
-        # 6) Delete from database (if exists)
+        except Exception as e:
+            repo_b_url = DEFAULT_REPO_B_URL
+            step_results['errors'].append(f"lookup service failed: {e}")
+
+        # 1) Delete YAMLs in Repo B via GitHub API
         try:
-            service_manager.delete_service(service_name)
-        except Exception:
-            pass
-        
-        return jsonify({'message': f'Service {service_name} deleted successfully'})
-        
+            yaml_files_to_delete = [
+                'deployment.yaml','service.yaml','configmap.yaml','hpa.yaml',
+                'ingress.yaml','ingress-gateway.yaml','namespace.yaml','secret.yaml'
+            ]
+            if _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete):
+                step_results['repo_b_yaml_deleted'] = True
+            else:
+                step_results['errors'].append('failed to delete YAMLs in Repo B')
+        except Exception as e:
+            step_results['errors'].append(f"repo B deletion error: {e}")
+
+        # 2) Delete ArgoCD Application via API
+        try:
+            from config import ARGOCD_SERVER_URL, ARGOCD_ADMIN_PASSWORD
+            import requests
+            base_url = ARGOCD_SERVER_URL.rstrip('/')
+            login_resp = requests.post(
+                f"{base_url}/api/v1/session",
+                json={'username': 'admin', 'password': ARGOCD_ADMIN_PASSWORD},
+                timeout=10,
+                verify=False
+            )
+            if login_resp.ok:
+                token = login_resp.json().get('token')
+                headers = {'Authorization': f'Bearer {token}'}
+                delete_resp = requests.delete(
+                    f"{base_url}/api/v1/applications/{service_name}",
+                    params={'cascade': 'true', 'propagationPolicy': 'foreground'},
+                    headers=headers,
+                    timeout=15,
+                    verify=False
+                )
+                if delete_resp.status_code in (200, 202, 204):
+                    step_results['argocd_app_deleted'] = True
+                else:
+                    step_results['errors'].append(f"argocd delete status {delete_resp.status_code}")
+            else:
+                step_results['errors'].append('argocd login failed')
+        except Exception as e:
+            step_results['errors'].append(f"argocd api error: {e}")
+
+        # 3) Delete from MongoDB (authoritative)
+        try:
+            if hasattr(service_manager, 'delete_service_from_all_collections'):
+                service_manager.delete_service_from_all_collections(service_name)
+            else:
+                service_manager.delete_service(service_name)
+            step_results['database_deleted'] = True
+        except Exception as e:
+            step_results['errors'].append(f"database delete error: {e}")
+
+        return jsonify({
+            'success': True,
+            'message': f'Service {service_name} deleted (best-effort)',
+            'details': step_results
+        })
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/services/sync', methods=['POST'])
 def sync_services():
