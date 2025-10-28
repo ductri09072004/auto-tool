@@ -20,7 +20,7 @@ class ArgoCDManager:
         self.restart_count = 0
         self.max_restarts = 10
         self.health_check_interval = 30  # seconds
-        self.ngrok_url = "https://f6dde8d941f5.ngrok-free.app"  # Fixed ngrok URL
+        self.ngrok_url = "https://d5a7ed750e62.ngrok-free.app"  # Fixed ngrok URL
         
     def check_prerequisites(self):
         """Check if all required tools are available"""
