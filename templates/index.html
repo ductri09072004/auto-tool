@@ -211,7 +211,7 @@
                                             Number of Pods (Replicas)
                                         </label>
                                         <input type="number" class="form-control" id="replicas" name="replicas" 
-                                               value="3" min="1" max="5">
+                                               value="2" min="1" max="5">
                                         <small class="text-muted">Initial pod instances</small>
                                     </div>
                                     <div class="col-md-4">
@@ -220,7 +220,7 @@
                                             Min Replicas (HPA)
                                         </label>
                                         <input type="number" class="form-control" id="min_replicas" name="min_replicas" 
-                                               value="2" min="1" max="5">
+                                               value="1" min="1" max="5">
                                         <small class="text-muted">Minimum pods for autoscaling</small>
                                     </div>
                                     <div class="col-md-4">
@@ -242,8 +242,8 @@
                                             CPU Request
                                         </label>
                                         <select class="form-select" id="cpu_request" name="cpu_request">
-                                            <option value="50m">50m (0.05 cores)</option>
-                                            <option value="100m" selected>100m (0.1 cores)</option>
+                                            <option value="50m" selected>50m (0.05 cores)</option>
+                                            <option value="100m">100m (0.1 cores)</option>
                                             <option value="200m">200m (0.2 cores)</option>
                                             <option value="250m">250m (0.25 cores)</option>
                                             <option value="500m">500m (0.5 cores)</option>
@@ -258,8 +258,8 @@
                                             CPU Limit
                                         </label>
                                         <select class="form-select" id="cpu_limit" name="cpu_limit">
-                                            <option value="100m">100m (0.1 cores)</option>
-                                            <option value="200m" selected>200m (0.2 cores)</option>
+                                            <option value="100m" selected>100m (0.1 cores)</option>
+                                            <option value="200m">200m (0.2 cores)</option>
                                             <option value="500m">500m (0.5 cores)</option>
                                             <option value="750m">750m (0.75 cores)</option>
                                             <option value="1000m">1000m (1 core)</option>
@@ -278,8 +278,8 @@
                                             Memory Request
                                         </label>
                                         <select class="form-select" id="memory_request" name="memory_request">
-                                            <option value="64Mi">64Mi (64 MB)</option>
-                                            <option value="128Mi" selected>128Mi (128 MB)</option>
+                                            <option value="64Mi" selected>64Mi (64 MB)</option>
+                                            <option value="128Mi">128Mi (128 MB)</option>
                                             <option value="256Mi">256Mi (256 MB)</option>
                                             <option value="512Mi">512Mi (512 MB)</option>
                                             <option value="1Gi">1Gi (1 GB)</option>
@@ -293,8 +293,8 @@
                                             Memory Limit
                                         </label>
                                         <select class="form-select" id="memory_limit" name="memory_limit">
-                                            <option value="128Mi">128Mi (128 MB)</option>
-                                            <option value="256Mi" selected>256Mi (256 MB)</option>
+                                            <option value="128Mi" selected>128Mi (128 MB)</option>
+                                            <option value="256Mi">256Mi (256 MB)</option>
                                             <option value="512Mi">512Mi (512 MB)</option>
                                             <option value="1Gi">1Gi (1 GB)</option>
                                             <option value="2Gi">2Gi (2 GB)</option>
