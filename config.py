@@ -14,9 +14,12 @@ ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://auto-tool.up.railw
 
 # ArgoCD API Configuration
 # Note: Use https:// for ngrok URLs, ArgoCD automatically redirects HTTP to HTTPS
-ARGOCD_SERVER_URL = os.getenv('ARGOCD_SERVER_URL', 'https://d5a7ed750e62.ngrok-free.app')
+ARGOCD_SERVER_URL = os.getenv('ARGOCD_SERVER_URL', 'https://fb634de3335a.ngrok-free.app')
 ARGOCD_TOKEN = os.getenv('ARGOCD_TOKEN', '')
 ARGOCD_ADMIN_PASSWORD = os.getenv('ARGOCD_ADMIN_PASSWORD', 'IG42zHWiFya1XbaR')
+
+# Public Gateway base URL for proxying service health (e.g., https://gateway.your-domain)
+GATEWAY_BASE_URL = os.getenv('GATEWAY_BASE_URL', '')
 
 # Debug logging for tokens
 print(f"MANIFESTS_REPO_TOKEN: {'SET' if MANIFESTS_REPO_TOKEN else 'NOT SET'}")
