@@ -1269,6 +1269,20 @@ def get_services():
                 avg_response_time = 'N/A'
                 uptime = 'N/A'
 
+            # Extract repo_a from metadata
+            repo_a = svc.get('repo_name', '')
+            if not repo_a:
+                # Try to extract from repo_url if available
+                repo_url = svc.get('repo_url', '')
+                if repo_url and 'github.com' in repo_url:
+                    try:
+                        p = urlparse(repo_url)
+                        parts = [x for x in p.path.strip('/').split('/') if x]
+                        if len(parts) >= 2:
+                            repo_a = f"{parts[0]}/{parts[1].replace('.git','')}"
+                    except Exception:
+                        pass
+
             services.append({
                 'name': service_name,
                 'namespace': svc.get('namespace') or service_name,
@@ -1291,7 +1305,9 @@ def get_services():
                 'avg_response_time': avg_response_time,
                 'uptime': uptime,
                 'repo_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}",
-                'k8s_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}/k8s"
+                'k8s_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}/k8s",
+                'repo_a': repo_a,
+                'repo_b': owner_repo
             })
 
         # Filter to only show healthy services
