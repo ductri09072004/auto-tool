@@ -12,7 +12,7 @@ import time
 import threading
 from service_manager import ServiceManager
 from api_db import register_db_api
-from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL, TEMPLATE_A_PATH, TEMPLATE_B_PATH, FALLBACK_TEMPLATE_B, REPO_B_SERVICES_PATH, GATEWAY_BASE_URL
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL, TEMPLATE_A_PATH, TEMPLATE_B_PATH, FALLBACK_TEMPLATE_B, REPO_B_SERVICES_PATH
 
 # Environment detection
 def is_railway_environment():
@@ -26,61 +26,6 @@ def has_git_command():
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
-
-@app.route('/api/health/<service_name>', methods=['GET'])
-def proxy_service_health(service_name):
-    """Proxy service health via public gateway to avoid CORS and add fallback."""
-    try:
-        if not GATEWAY_BASE_URL:
-            return jsonify({'success': False, 'error': 'GATEWAY_BASE_URL not configured'}), 500
-
-        # Build ingress URL: expect services mounted under /api/<service>/api/health
-        base = GATEWAY_BASE_URL.rstrip('/')
-        url = f"{base}/api/{service_name}/api/health"
-
-        started = time.time()
-        try:
-            resp = requests.get(url, timeout=8, headers={'ngrok-skip-browser-warning': 'true'})
-            latency = int((time.time() - started) * 1000)
-            if resp.ok:
-                data = resp.json()
-                return jsonify({
-                    'success': True,
-                    'service': service_name,
-                    'status': data.get('status', 'unknown'),
-                    'cpu_pct': data.get('cpu_pct', 'N/A'),
-                    'mem_used_mb': data.get('mem_used_mb', 'N/A'),
-                    'mem_total_mb': data.get('mem_total_mb', 'N/A'),
-                    'latency_ms': latency,
-                    'updated_at': datetime.utcnow().isoformat()
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'service': service_name,
-                    'status': 'error',
-                    'cpu_pct': 'N/A',
-                    'mem_used_mb': 'N/A',
-                    'mem_total_mb': 'N/A',
-                    'latency_ms': latency,
-                    'updated_at': datetime.utcnow().isoformat(),
-                    'error': f'status {resp.status_code}'
-                }), 502
-        except Exception as e:
-            latency = int((time.time() - started) * 1000)
-            return jsonify({
-                'success': False,
-                'service': service_name,
-                'status': 'unreachable',
-                'cpu_pct': 'N/A',
-                'mem_used_mb': 'N/A',
-                'mem_total_mb': 'N/A',
-                'latency_ms': latency,
-                'updated_at': datetime.utcnow().isoformat(),
-                'error': str(e)
-            }), 502
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 def _get_argocd_session_token():
     """Get ArgoCD session token using admin password"""
