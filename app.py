@@ -1046,11 +1046,15 @@ def get_services():
                             cpu_limit = svc.get('cpu_limit')
                             memory_limit = svc.get('memory_limit')
                             
+                            # Generate image name from service name
+                            image = f"ghcr.io/ductri09072004/{service_name}:latest"
+                            
                             deployment = {
                                 'spec': {
                                     'template': {
                                         'spec': {
                                             'containers': [{
+                                                'image': image,
                                                 'resources': {
                                                     'requests': {
                                                         'cpu': cpu_request or 'N/A',
@@ -1117,6 +1121,15 @@ def get_services():
                         memory_limit = lims.get('memory', 'N/A')
                 except Exception as e:
                     print(f"Warning: Could not extract resources for {service_name}: {e}")
+
+                # Extract Docker image from deployment
+                image = 'N/A'
+                try:
+                    containers = deployment['spec']['template']['spec']['containers']
+                    if containers:
+                        image = containers[0].get('image', 'N/A')
+                except Exception as e:
+                    print(f"Warning: Could not extract image for {service_name}: {e}")
 
                 cpu_usage = 'N/A'
                 memory_usage = 'N/A'
@@ -1269,19 +1282,21 @@ def get_services():
                 avg_response_time = 'N/A'
                 uptime = 'N/A'
 
-            # Extract repo_a from metadata
-            repo_a = svc.get('repo_name', '')
+            # Extract repo_a from repo_url (full GitHub URL)
+            repo_a = ''
+            repo_url = svc.get('repo_url', '')
+            if repo_url and 'github.com' in repo_url:
+                try:
+                    p = urlparse(repo_url)
+                    parts = [x for x in p.path.strip('/').split('/') if x]
+                    if len(parts) >= 2:
+                        repo_a = f"{parts[0]}/{parts[1].replace('.git','')}"
+                except Exception:
+                    pass
+            
+            # Fallback to repo_name if repo_url not available
             if not repo_a:
-                # Try to extract from repo_url if available
-                repo_url = svc.get('repo_url', '')
-                if repo_url and 'github.com' in repo_url:
-                    try:
-                        p = urlparse(repo_url)
-                        parts = [x for x in p.path.strip('/').split('/') if x]
-                        if len(parts) >= 2:
-                            repo_a = f"{parts[0]}/{parts[1].replace('.git','')}"
-                    except Exception:
-                        pass
+                repo_a = svc.get('repo_name', '')
 
             services.append({
                 'name': service_name,
@@ -1307,7 +1322,8 @@ def get_services():
                 'repo_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}",
                 'k8s_path': f"https://github.com/{owner_repo}/tree/main/services/{service_name}/k8s",
                 'repo_a': repo_a,
-                'repo_b': owner_repo
+                'repo_b': owner_repo,
+                'image': image
             })
 
         # Filter to only show healthy services
