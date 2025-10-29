@@ -12,7 +12,7 @@ import time
 import threading
 from service_manager import ServiceManager
 from api_db import register_db_api
-from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL, TEMPLATE_A_PATH, TEMPLATE_B_PATH, FALLBACK_TEMPLATE_B, REPO_B_SERVICES_PATH
+from config import GITHUB_TOKEN, GHCR_TOKEN, MANIFESTS_REPO_TOKEN, ARGOCD_WEBHOOK_URL, DASHBOARD_TOKEN, WEBHOOK_URL, TEMPLATE_A_PATH, TEMPLATE_B_PATH, FALLBACK_TEMPLATE_B, REPO_B_SERVICES_PATH, ARGOCD_SERVER_URL
 
 # Environment detection
 def is_railway_environment():
@@ -1236,8 +1236,8 @@ def get_services():
                     # Railway: Try /api/health endpoint first, then ArgoCD API
                     try:
                         # Try to get real-time metrics from /api/health endpoint
-                        if GATEWAY_BASE_URL:
-                            health_url = f"{GATEWAY_BASE_URL}/api/{service_name}/api/health"
+                        if ARGOCD_SERVER_URL:
+                            health_url = f"{ARGOCD_SERVER_URL}/api/service/{service_name}"
                             try:
                                 health_response = requests.get(health_url, timeout=5)
                                 if health_response.status_code == 200:
@@ -1262,7 +1262,7 @@ def get_services():
                                 print(f"⚠️ Failed to get /api/health for {service_name}: {e}")
                                 raise Exception("Health endpoint failed")
                         else:
-                            raise Exception("GATEWAY_BASE_URL not configured")
+                            raise Exception("ARGOCD_SERVER_URL not configured")
                     except Exception:
                         # Fallback to ArgoCD API + basic metrics
                         try:
@@ -4377,8 +4377,8 @@ def test_health_detection():
             
             if is_railway_environment():
                 # Railway mode
-                if GATEWAY_BASE_URL:
-                    health_url = f"{GATEWAY_BASE_URL}/api/{service_name}/api/health"
+                if ARGOCD_SERVER_URL:
+                    health_url = f"{ARGOCD_SERVER_URL}/api/service/{service_name}"
                     try:
                         response = requests.get(health_url, timeout=3)
                         if response.status_code == 200:
@@ -4412,7 +4412,7 @@ def test_health_detection():
         return jsonify({
             'success': True,
             'environment': 'Railway' if is_railway_environment() else 'Local',
-            'gateway_base_url': GATEWAY_BASE_URL,
+            'gateway_base_url': ARGOCD_SERVER_URL,
             'services': results
         })
         
