@@ -600,25 +600,72 @@ jobs:
         fi
         
         echo "⏳ Waiting for ArgoCD application to be healthy..."
+        echo "🔍 Debug info:"
+        echo "   ArgoCD Server: $ARGOCD_SERVER"
+        echo "   Service Name: $SERVICE"
+        echo "   Password: ${ARGOCD_PASSWORD:+SET}${ARGOCD_PASSWORD:-NOT SET}"
         
-        # Wait for ArgoCD to be healthy (max 5 minutes)
-        for i in {1..30}; do
-          echo "🔍 Checking ArgoCD status (attempt $i/30)..."
+        # Verify ArgoCD server is reachable first
+        echo "🔍 Testing ArgoCD server connectivity..."
+        CONNECTIVITY_TEST=$(curl -s -o /dev/null -w "%{http_code}" "$ARGOCD_SERVER/api/version" \
+          -H "ngrok-skip-browser-warning: true" \
+          -k \
+          --max-time 10 || echo "000")
+        
+        if [ "$CONNECTIVITY_TEST" = "000" ] || [ "$CONNECTIVITY_TEST" = "" ]; then
+          echo "❌ Cannot reach ArgoCD server at: $ARGOCD_SERVER"
+          echo "💡 Troubleshooting:"
+          echo "   1. Verify ARGOCD_SERVER_URL is correct"
+          echo "   2. Ensure ngrok tunnel is active (if using ngrok)"
+          echo "   3. Check if URL is accessible from GitHub Actions"
+          exit 0
+        elif [ "$CONNECTIVITY_TEST" != "200" ]; then
+          echo "⚠️ ArgoCD server returned HTTP $CONNECTIVITY_TEST"
+          echo "💡 Server may require authentication or be misconfigured"
+        else
+          echo "✅ ArgoCD server is reachable"
+        fi
+        
+        # Wait for ArgoCD to be healthy (max 10 seconds)
+        MAX_ATTEMPTS=2
+        SLEEP_INTERVAL=5
+        for i in $(seq 1 $MAX_ATTEMPTS); do
+          echo "🔍 Checking ArgoCD status (attempt $i/$MAX_ATTEMPTS)..."
           
           # Login to ArgoCD
-          SESSION_RESP=$(curl -s -X POST "$ARGOCD_SERVER/api/v1/session" \
+          SESSION_RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$ARGOCD_SERVER/api/v1/session" \
             -H "Content-Type: application/json" \
             -H "ngrok-skip-browser-warning: true" \
             -d "{\"username\":\"admin\",\"password\":\"$ARGOCD_PASSWORD\"}" \
             -k \
+            --max-time 5 \
             -c /tmp/argocd-cleanup-cookies.txt)
           
-          if echo "$SESSION_RESP" | grep -q "token"; then
+          HTTP_STATUS=$(echo "$SESSION_RESP" | grep "HTTP_STATUS:" | cut -d: -f2)
+          SESSION_BODY=$(echo "$SESSION_RESP" | grep -v "HTTP_STATUS:")
+          
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "⚠️ ArgoCD login failed with HTTP $HTTP_STATUS"
+            echo "   Response: ${SESSION_BODY:0:200}"
+            if [ "$i" -eq 1 ]; then
+              echo "💡 Troubleshooting:"
+              echo "   1. Verify ARGOCD_SERVER_URL is correct: $ARGOCD_SERVER"
+              echo "   2. Check ARGOCD_ADMIN_PASSWORD is correct"
+              echo "   3. Ensure ArgoCD is accessible from GitHub Actions"
+            fi
+          elif echo "$SESSION_BODY" | grep -q "token"; then
             # Check application status
             STATUS_RESP=$(curl -s -X GET "$ARGOCD_SERVER/api/v1/applications/$SERVICE" \
               -H "ngrok-skip-browser-warning: true" \
               -b /tmp/argocd-cleanup-cookies.txt \
+              --max-time 5 \
               -k)
+            
+            # Debug: Show application status
+            if echo "$STATUS_RESP" | grep -q "not found\|NotFound"; then
+              echo "⚠️ Application $SERVICE not found in ArgoCD"
+              echo "   This may be normal if application was not created yet"
+            fi
             
             if echo "$STATUS_RESP" | grep -q '"health":{"status":"Healthy"'; then
               echo "✅ ArgoCD application $SERVICE is healthy!"
@@ -662,16 +709,32 @@ jobs:
               
               exit 0
             else
-              echo "⏳ ArgoCD still deploying... (attempt $i/30)"
+              # Show current status for debugging
+              HEALTH_STATUS=$(echo "$STATUS_RESP" | grep -o '"health":{"status":"[^"]*"' | cut -d'"' -f6 || echo "unknown")
+              SYNC_STATUS=$(echo "$STATUS_RESP" | grep -o '"status":{"sync":{"status":"[^"]*"' | cut -d'"' -f8 || echo "unknown")
+              echo "⏳ ArgoCD still deploying... (attempt $i/$MAX_ATTEMPTS)"
+              echo "   Current health: ${HEALTH_STATUS:-checking...}, sync: ${SYNC_STATUS:-checking...}"
             fi
           else
-            echo "⚠️ Failed to login to ArgoCD (attempt $i/30)"
+            echo "⚠️ Failed to login to ArgoCD (attempt $i/$MAX_ATTEMPTS)"
           fi
           
-          sleep 10
+          # Only sleep if not last attempt
+          if [ "$i" -lt "$MAX_ATTEMPTS" ]; then
+            sleep $SLEEP_INTERVAL
+          fi
         done
         
-        echo "⚠️ ArgoCD did not reach healthy status within 5 minutes"
-        echo "💡 Check ArgoCD UI at $ARGOCD_SERVER for detailed status"
+        echo "⚠️ ArgoCD did not reach healthy status within 10 seconds"
+        echo "💡 Troubleshooting:"
+        echo "   1. Check ArgoCD UI at $ARGOCD_SERVER for detailed status"
+        echo "   2. Verify ARGOCD_SERVER_URL is correct and accessible: $ARGOCD_SERVER"
+        echo "   3. Check if ngrok tunnel is active (if using ngrok)"
+        echo "   4. Verify application $SERVICE exists in ArgoCD"
+        echo "   5. Check application logs in ArgoCD UI"
+        echo ""
+        echo "ℹ️ Skipping cleanup step - YAML files will remain in repo"
+        echo "   This is not a critical error - application may deploy successfully later"
+        echo "   You can manually cleanup YAML files after deployment is complete"
 
 

@@ -11,7 +11,15 @@ import requests
 import shutil
 import signal
 import threading
+import socket
 from datetime import datetime
+
+# Try to import psutil, fallback to subprocess if not available
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 class ArgoCDManager:
     def __init__(self):
@@ -58,13 +66,51 @@ class ArgoCDManager:
             print(f"❌ Error checking namespace: {e}")
             return False
 
+    def check_argocd_service(self):
+        """Check if ArgoCD server service exists and is ready"""
+        try:
+            result = subprocess.run(
+                ['kubectl', 'get', 'svc', 'argocd-server', '-n', 'argocd'],
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                print("✅ ArgoCD server service exists")
+                return True
+            else:
+                print("❌ ArgoCD server service not found")
+                print(f"   Error: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"❌ Error checking ArgoCD service: {e}")
+            return False
+
     def start_argocd_portforward(self):
         """Start ArgoCD port-forward"""
         print("🚀 Starting ArgoCD port-forward...")
         
         try:
+            # Check if port 8080 is available
+            if not self.check_port_available(8080):
+                print("⚠️ Port 8080 is already in use, cleaning up...")
+                self.kill_all_port_forwards()
+                time.sleep(2)
+                if not self.check_port_available(8080):
+                    print("❌ Port 8080 is still in use after cleanup")
+                    print("💡 Please manually kill the process using port 8080")
+                    return False
+            
+            # Stop existing port-forward
             self.stop_argocd_portforward()
             
+            # Check ArgoCD service exists
+            if not self.check_argocd_service():
+                print("❌ Cannot start port-forward: ArgoCD service not available")
+                return False
+            
+            # Start port-forward
             self.argocd_process = subprocess.Popen(
                 ['kubectl', 'port-forward', 'svc/argocd-server', '-n', 'argocd', '8080:80'],
                 stdout=subprocess.PIPE,
@@ -73,17 +119,108 @@ class ArgoCDManager:
                 shell=True
             )
             
+            # Wait a bit for process to start
             time.sleep(3)
             
+            # Check if process is still running
             if self.argocd_process and self.argocd_process.poll() is None:
                 print(f"✅ ArgoCD port-forward started (PID: {self.argocd_process.pid})")
                 return True
             else:
+                # Process died immediately, read error from stderr
+                error_output = ""
+                if self.argocd_process:
+                    try:
+                        _, stderr_data = self.argocd_process.communicate(timeout=1)
+                        error_output = stderr_data if stderr_data else ""
+                    except:
+                        pass
+                
                 print("❌ ArgoCD port-forward failed to start")
+                if error_output:
+                    print(f"   Error details: {error_output[:200]}")
+                else:
+                    print("   (No error details available)")
                 return False
                 
         except Exception as e:
             print(f"❌ Failed to start ArgoCD port-forward: {e}")
+            return False
+
+    def kill_all_port_forwards(self):
+        """Kill all existing kubectl port-forward processes"""
+        try:
+            if HAS_PSUTIL:
+                # psutil is available, use it for better process management
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        cmdline = proc.info.get('cmdline', [])
+                        if cmdline and 'kubectl' in ' '.join(cmdline).lower() and 'port-forward' in ' '.join(cmdline).lower():
+                            if 'argocd-server' in ' '.join(cmdline) or '8080:80' in ' '.join(cmdline):
+                                print(f"🧹 Killing existing port-forward process (PID: {proc.info['pid']})")
+                                proc.terminate()
+                                try:
+                                    proc.wait(timeout=3)
+                                except psutil.TimeoutExpired:
+                                    proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            else:
+                # Fallback: Use Windows taskkill or Linux pkill
+                if sys.platform == 'win32':
+                    # Windows: Find and kill kubectl port-forward processes
+                    try:
+                        # Find PIDs of processes listening on port 8080
+                        result = subprocess.run(
+                            ['netstat', '-ano'],
+                            capture_output=True,
+                            text=True,
+                            shell=True,
+                            timeout=5
+                        )
+                        if result.returncode == 0:
+                            lines = result.stdout.split('\n')
+                            for line in lines:
+                                if ':8080' in line and 'LISTENING' in line:
+                                    parts = line.split()
+                                    if len(parts) > 4:
+                                        pid = parts[-1]
+                                        # Verify it's kubectl
+                                        try:
+                                            task_result = subprocess.run(
+                                                ['tasklist', '/FI', f'PID eq {pid}'],
+                                                capture_output=True,
+                                                text=True,
+                                                shell=True,
+                                                timeout=3
+                                            )
+                                            if 'kubectl' in task_result.stdout:
+                                                print(f"🧹 Killing kubectl process (PID: {pid})")
+                                                subprocess.run(['taskkill', '/F', '/PID', pid], shell=True, timeout=5)
+                                        except:
+                                            pass
+                    except Exception as e:
+                        print(f"⚠️ Error killing processes: {e}")
+                else:
+                    # Linux/Mac: Use pkill
+                    try:
+                        subprocess.run(['pkill', '-f', 'kubectl.*port-forward.*argocd-server'], timeout=5)
+                        print("🧹 Killed existing kubectl port-forward processes")
+                    except:
+                        pass
+            
+            time.sleep(1)  # Wait for processes to die
+        except Exception as e:
+            print(f"⚠️ Error killing port-forward processes: {e}")
+
+    def check_port_available(self, port):
+        """Check if port is available"""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(('127.0.0.1', port))
+            sock.close()
+            return True
+        except OSError:
             return False
 
     def stop_argocd_portforward(self):
@@ -96,6 +233,9 @@ class ArgoCDManager:
             except subprocess.TimeoutExpired:
                 self.argocd_process.kill()
                 self.argocd_process.wait()
+        
+        # Also kill any orphaned port-forward processes
+        self.kill_all_port_forwards()
 
     def test_argocd(self):
         """Test ArgoCD connectivity"""
@@ -193,10 +333,20 @@ class ArgoCDManager:
             print("\n💡 Tip: Make sure ArgoCD is installed in your Kubernetes cluster")
             sys.exit(1)
         
+        # Check ArgoCD service
+        if not self.check_argocd_service():
+            print("\n💡 Tip: Make sure ArgoCD server service is running")
+            print("   Run: kubectl get svc -n argocd")
+            sys.exit(1)
+        
         # Start ArgoCD port-forward
         print("\n🚀 Starting ArgoCD port-forward...")
         if not self.start_argocd_portforward():
-            print("❌ Failed to start ArgoCD port-forward")
+            print("\n❌ Failed to start ArgoCD port-forward")
+            print("💡 Troubleshooting tips:")
+            print("   1. Check if port 8080 is available: netstat -ano | findstr :8080")
+            print("   2. Verify ArgoCD service: kubectl get svc argocd-server -n argocd")
+            print("   3. Check kubectl can connect: kubectl cluster-info")
             sys.exit(1)
         
         # Test initial connectivity
