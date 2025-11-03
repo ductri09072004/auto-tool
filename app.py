@@ -4496,5 +4496,5 @@ def delete_service_yaml_templates(service_name):
 
 if __name__ == '__main__':
     import os
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 3050))
     app.run(debug=False, host='0.0.0.0', port=port)
