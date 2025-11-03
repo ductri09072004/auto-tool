@@ -3327,19 +3327,24 @@ spec:
         import threading
         
         def delete_yaml_files_after_sync(service_name, repo_b_url):
-            """Wait briefly for ArgoCD (via API) then delete config YAML in Repo B."""
+            """Wait (tool-side) for ArgoCD Healthy+Synced, then delete YAMLs in Repo B."""
             try:
                 from config import ARGOCD_SERVER_URL, ARGOCD_ADMIN_PASSWORD
                 import requests as _req
+                try:
+                    import urllib3
+                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                except Exception:
+                    pass
                 base = (ARGOCD_SERVER_URL or '').rstrip('/')
                 if not base or not ARGOCD_ADMIN_PASSWORD:
-                    print("⚠️ Missing ARGOCD_SERVER_URL/ARGOCD_ADMIN_PASSWORD, proceeding best-effort cleanup")
-                    _delete_yaml_files_via_github_api(service_name, repo_b_url, ['configmap.yaml'])
-                    return
+                    print("⚠️ Missing ARGOCD_SERVER_URL/ARGOCD_ADMIN_PASSWORD, skip cleanup (no Healthy check)")
+                    return  # do not delete without health verification
                 
-                # Wait up to ~20s (4x5s) for Healthy+Synced
-                attempts, sleep_s = 4, 5
+                # Wait up to ~30s (6x5s) for Healthy+Synced
+                attempts, sleep_s = 6, 5
                 token = None
+                is_ready = False
                 for i in range(attempts):
                     try:
                         if not token:
@@ -3356,14 +3361,30 @@ spec:
                                 health = (st.get('health') or {}).get('status','')
                                 print(f"🔍 ArgoCD status for {service_name}: sync={sync}, health={health} (attempt {i+1}/{attempts})")
                                 if sync.lower()== 'synced' and health.lower() == 'healthy':
+                                    is_ready = True
                                     break
                     except Exception as _:
                         pass
                     time.sleep(sleep_s)
                 
-                # Delete only config file (as requested)
-                print(f"🧹 Deleting configmap.yaml for {service_name} in Repo B...")
-                _delete_yaml_files_via_github_api(service_name, repo_b_url, ['configmap.yaml'])
+                if not is_ready:
+                    print(f"⏭️ Skipping cleanup for {service_name}: ArgoCD not Healthy+Synced within wait window")
+                    return
+                
+                # Delete all manifest files for the service in Repo B after Healthy+Synced
+                yaml_files_to_delete = [
+                    'deployment.yaml',
+                    'service.yaml',
+                    'configmap.yaml',
+                    'hpa.yaml',
+                    'ingress.yaml',
+                    'ingress-gateway.yaml',
+                    'namespace.yaml',
+                    'secret.yaml',
+                    'argocd-application.yaml'
+                ]
+                print(f"🧹 Deleting YAML files for {service_name} in Repo B after Healthy+Synced...")
+                _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete)
             except Exception as e:
                 print(f"Error in delete_yaml_files_after_sync: {e}")
         
