@@ -662,58 +662,85 @@ jobs:
               -k)
             
             # Debug: Show application status
-            if echo "$STATUS_RESP" | grep -q "not found\|NotFound"; then
+            if echo "$STATUS_RESP" | grep -qi "not found\|NotFound\|code.*404"; then
               echo "⚠️ Application $SERVICE not found in ArgoCD"
               echo "   This may be normal if application was not created yet"
-            fi
-            
-            if echo "$STATUS_RESP" | grep -q '"health":{"status":"Healthy"'; then
-              echo "✅ ArgoCD application $SERVICE is healthy!"
+              echo "   Application will be created automatically by ArgoCD sync"
+            elif [ -z "$STATUS_RESP" ] || [ "$STATUS_RESP" = "" ]; then
+              echo "⚠️ Empty response from ArgoCD API"
+              echo "   Application may not exist or ArgoCD is still processing"
+            else
+              # Try to extract health and sync status with multiple patterns
+              HEALTH_STATUS=""
+              SYNC_STATUS=""
               
-              # Cleanup YAML files from Repo B
-              echo "🧹 Cleaning up YAML files from Repo B..."
-              cd manifests
+              # Pattern 1: "health":{"status":"Healthy"
+              HEALTH_STATUS=$(echo "$STATUS_RESP" | grep -o '"health":[^,}]*"status":"[^"]*' | grep -o 'status":"[^"]*' | cut -d'"' -f3 || echo "")
               
-              # Files to delete
-              YAML_FILES=(
-                "services/$SERVICE/k8s/deployment.yaml"
-                "services/$SERVICE/k8s/service.yaml"
-                "services/$SERVICE/k8s/configmap.yaml"
-                "services/$SERVICE/k8s/hpa.yaml"
-                "services/$SERVICE/k8s/ingress.yaml"
-                "services/$SERVICE/k8s/ingress-gateway.yaml"
-                "services/$SERVICE/k8s/namespace.yaml"
-                "services/$SERVICE/k8s/secret.yaml"
-                "apps/$SERVICE-application.yaml"
-              )
+              # Pattern 2: "status":{"sync":{"status":"Synced"
+              SYNC_STATUS=$(echo "$STATUS_RESP" | grep -o '"status":[^,}]*"sync":[^,}]*"status":"[^"]*' | grep -o 'status":"[^"]*' | tail -1 | cut -d'"' -f3 || echo "")
               
-              # Delete files that exist
-              for file in "${YAML_FILES[@]}"; do
-                if [ -f "$file" ]; then
-                  echo "🗑️ Deleting $file"
-                  git rm "$file" 2>/dev/null || rm -f "$file"
-                fi
-              done
-              
-              # Commit and push cleanup
-              git config --local user.email "action@github.com"
-              git config --local user.name "GitHub Action"
-              git add -A
-              if git diff --staged --quiet; then
-                echo "ℹ️ No changes to commit"
-              else
-                git commit -m "Cleanup YAML files after ArgoCD deployment - $SERVICE" || exit 0
-                git push
-                echo "✅ YAML files cleaned up successfully"
+              # Fallback patterns
+              if [ -z "$HEALTH_STATUS" ]; then
+                HEALTH_STATUS=$(echo "$STATUS_RESP" | grep -o '"healthStatus":"[^"]*' | cut -d'"' -f3 || echo "")
+              fi
+              if [ -z "$SYNC_STATUS" ]; then
+                SYNC_STATUS=$(echo "$STATUS_RESP" | grep -o '"syncStatus":"[^"]*' | cut -d'"' -f3 || echo "")
               fi
               
-              exit 0
-            else
-              # Show current status for debugging
-              HEALTH_STATUS=$(echo "$STATUS_RESP" | grep -o '"health":{"status":"[^"]*"' | cut -d'"' -f6 || echo "unknown")
-              SYNC_STATUS=$(echo "$STATUS_RESP" | grep -o '"status":{"sync":{"status":"[^"]*"' | cut -d'"' -f8 || echo "unknown")
-              echo "⏳ ArgoCD still deploying... (attempt $i/$MAX_ATTEMPTS)"
-              echo "   Current health: ${HEALTH_STATUS:-checking...}, sync: ${SYNC_STATUS:-checking...}"
+              # Show extracted status
+              if [ -z "$HEALTH_STATUS" ] && [ -z "$SYNC_STATUS" ]; then
+                echo "⚠️ Could not parse ArgoCD status from response"
+                echo "   Response preview: ${STATUS_RESP:0:300}..."
+              else
+                echo "   Current health: ${HEALTH_STATUS:-unknown}, sync: ${SYNC_STATUS:-unknown}"
+              fi
+              
+              # Check if healthy
+              if [ "$HEALTH_STATUS" = "Healthy" ] && [ "$SYNC_STATUS" = "Synced" ]; then
+                echo "✅ ArgoCD application $SERVICE is healthy and synced!"
+                
+                # Cleanup YAML files from Repo B
+                echo "🧹 Cleaning up YAML files from Repo B..."
+                cd manifests
+                
+                # Files to delete
+                YAML_FILES=(
+                  "services/$SERVICE/k8s/deployment.yaml"
+                  "services/$SERVICE/k8s/service.yaml"
+                  "services/$SERVICE/k8s/configmap.yaml"
+                  "services/$SERVICE/k8s/hpa.yaml"
+                  "services/$SERVICE/k8s/ingress.yaml"
+                  "services/$SERVICE/k8s/ingress-gateway.yaml"
+                  "services/$SERVICE/k8s/namespace.yaml"
+                  "services/$SERVICE/k8s/secret.yaml"
+                  "apps/$SERVICE-application.yaml"
+                )
+                
+                # Delete files that exist
+                for file in "${YAML_FILES[@]}"; do
+                  if [ -f "$file" ]; then
+                    echo "🗑️ Deleting $file"
+                    git rm "$file" 2>/dev/null || rm -f "$file"
+                  fi
+                done
+                
+                # Commit and push cleanup
+                git config --local user.email "action@github.com"
+                git config --local user.name "GitHub Action"
+                git add -A
+                if git diff --staged --quiet; then
+                  echo "ℹ️ No changes to commit"
+                else
+                  git commit -m "Cleanup YAML files after ArgoCD deployment - $SERVICE" || exit 0
+                  git push
+                  echo "✅ YAML files cleaned up successfully"
+                fi
+                
+                exit 0
+              else
+                echo "⏳ ArgoCD still deploying... (attempt $i/$MAX_ATTEMPTS)"
+              fi
             fi
           else
             echo "⚠️ Failed to login to ArgoCD (attempt $i/$MAX_ATTEMPTS)"
