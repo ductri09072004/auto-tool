@@ -3323,291 +3323,52 @@ spec:
         
         print(f"Service '{service_name}' created with YAML manifests in Repo B")
         
-        # Schedule deletion of YAML files after ArgoCD sync (in background)
+        # Schedule deletion of YAML files after ArgoCD sync (in background) using ArgoCD API
         import threading
         
         def delete_yaml_files_after_sync(service_name, repo_b_url):
-            """Delete YAML files after ArgoCD has synced with new changes"""
+            """Wait briefly for ArgoCD (via API) then delete config YAML in Repo B."""
             try:
-                import time
-                import tempfile
-                import shutil
-                import json
+                from config import ARGOCD_SERVER_URL, ARGOCD_ADMIN_PASSWORD
+                import requests as _req
+                base = (ARGOCD_SERVER_URL or '').rstrip('/')
+                if not base or not ARGOCD_ADMIN_PASSWORD:
+                    print("⚠️ Missing ARGOCD_SERVER_URL/ARGOCD_ADMIN_PASSWORD, proceeding best-effort cleanup")
+                    _delete_yaml_files_via_github_api(service_name, repo_b_url, ['configmap.yaml'])
+                    return
                 
-                # Track sync states to detect actual changes
-                last_sync_status = None
-                last_health_status = None
-                last_revision = None
-                sync_changed = False
-                
-                # Wait for ArgoCD to sync with intelligent checking
-                max_wait_time = 300  # 5 minutes maximum
-                check_interval = 30  # Check every 30 seconds
-                waited_time = 0
-                
-                while waited_time < max_wait_time:
-                    time.sleep(check_interval)
-                    waited_time += check_interval
-                    
+                # Wait up to ~20s (4x5s) for Healthy+Synced
+                attempts, sleep_s = 4, 5
+                token = None
+                for i in range(attempts):
                     try:
-                        # Get detailed ArgoCD application status
-                        argocd_result = subprocess.run(
-                            ['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'json'],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        
-                        if argocd_result.returncode == 0:
-                            app_data = json.loads(argocd_result.stdout)
-                            status = app_data.get('status', {})
-                            
-                            sync_status = status.get('sync', {}).get('status', 'Unknown')
-                            health_status = status.get('health', {}).get('status', 'Unknown')
-                            revision = status.get('sync', {}).get('revision', 'Unknown')
-                            
-                            # Check if sync status or revision has changed (indicating new sync)
-                            if (last_sync_status and last_sync_status != sync_status) or \
-                               (last_revision and last_revision != revision):
-                                sync_changed = True
-                                print(f"ArgoCD sync state changed: {last_sync_status} -> {sync_status}, revision: {last_revision} -> {revision}")
-                            
-                            last_sync_status = sync_status
-                            last_health_status = health_status
-                            last_revision = revision
-                            
-                            print(f"ArgoCD status for {service_name} (waited {waited_time}s): sync={sync_status}, health={health_status}, revision={revision}")
-                            
-                            # Only proceed if we've seen a sync change AND current status is Synced
-                            # Allow Progressing health status for ingress loading
-                            if sync_changed and sync_status == 'Synced' and health_status in ['Healthy', 'Progressing']:
-                                # For Progressing health status (ingress loading), skip pod check and proceed
-                                if health_status == 'Progressing':
-                                    print(f"ArgoCD synced with new changes (ingress loading), deleting YAML files for {service_name}...")
+                        if not token:
+                            sess = _req.post(f"{base}/api/v1/session", json={'username': 'admin','password': ARGOCD_ADMIN_PASSWORD}, headers={'ngrok-skip-browser-warning':'true'}, timeout=8, verify=False)
+                            if sess.ok:
+                                token = (sess.json() or {}).get('token')
+                        if token:
+                            hdr = {'Authorization': f'Bearer {token}','ngrok-skip-browser-warning':'true'}
+                            resp = _req.get(f"{base}/api/v1/applications/{service_name}", headers=hdr, timeout=8, verify=False)
+                            if resp.ok:
+                                data = resp.json() or {}
+                                st = (data.get('status') or {})
+                                sync = (st.get('sync') or {}).get('status','')
+                                health = (st.get('health') or {}).get('status','')
+                                print(f"🔍 ArgoCD status for {service_name}: sync={sync}, health={health} (attempt {i+1}/{attempts})")
+                                if sync.lower()== 'synced' and health.lower() == 'healthy':
                                     break
-                                else:
-                                    # For Healthy status, check if pods are running
-                                    if is_railway_environment():
-                                        # Skip pod check on Railway
-                                        print(f"ArgoCD synced with new changes (Railway), deleting YAML files for {service_name}...")
-                                        break
-                                    else:
-                                        pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                                   capture_output=True, text=True)
-                                        pods_running = 'Running' in pods_result.stdout if pods_result.returncode == 0 else False
-                                        
-                                        if pods_running:
-                                            print(f"ArgoCD synced with new changes and pods running for {service_name}, deleting YAML files...")
-                                            break
-                                        else:
-                                            print(f"ArgoCD synced but pods not running yet for {service_name}...")
-                            else:
-                                # If no sync change detected yet, continue waiting
-                                if not sync_changed:
-                                    print(f"Waiting for ArgoCD to detect changes for {service_name}...")
-                                else:
-                                    if health_status == 'Progressing':
-                                        print(f"ArgoCD sync changed but ingress still loading: sync={sync_status}, health={health_status}")
-                                    else:
-                                        print(f"ArgoCD sync changed but not ready: sync={sync_status}, health={health_status}")
-                        else:
-                            print(f"Failed to get ArgoCD application status: {argocd_result.stderr}")
-                            
-                    except Exception as kubectl_error:
-                        print(f"Kubectl check failed: {kubectl_error}")
+                    except Exception as _:
+                        pass
+                    time.sleep(sleep_s)
                 
-                # Final check after max wait time
-                if waited_time >= max_wait_time:
-                    print(f"ArgoCD sync timeout for {service_name} after {max_wait_time} seconds, proceeding anyway...")
-                
-                # Final comprehensive check before proceeding
-                if is_railway_environment():
-                    # On Railway, check ArgoCD status via API with retry logic
-                    print(f"Railway environment: Checking ArgoCD status via API for {service_name}")
-                    
-                    # Retry logic for ArgoCD health check
-                    max_health_retries = 5
-                    health_retry_delay = 30  # 30 seconds between retries
-                    
-                    for health_attempt in range(max_health_retries):
-                        argocd_status = _check_argocd_application_status(service_name)
-                        if argocd_status:
-                            sync_status = argocd_status.get('sync_status', 'Unknown')
-                            health_status = argocd_status.get('health_status', 'Unknown')
-                            print(f"ArgoCD status (attempt {health_attempt + 1}/{max_health_retries}): sync={sync_status}, health={health_status}")
-                            print(f"  - Sync Status: {sync_status} ({'✅' if sync_status == 'Synced' else '❌'})")
-                            print(f"  - Health Status: {health_status} ({'✅' if health_status == 'Healthy' else '⏳' if health_status == 'Progressing' else '❌'})")
-                            
-                            # Only proceed if both sync and health are ready
-                            # Progressing means still deploying, not ready yet
-                            if sync_status == 'Synced' and health_status == 'Healthy':
-                                print(f"✅ ArgoCD application {service_name} is ready (sync={sync_status}, health={health_status})")
-                                argocd_final = True
-                                pods_final = True
-                                break
-                            elif sync_status == 'Synced' and health_status == 'Progressing':
-                                print(f"⏳ ArgoCD application {service_name} is still deploying (sync={sync_status}, health={health_status})")
-                                print(f"⏳ Waiting for deployment to complete...")
-                                if health_attempt < max_health_retries - 1:
-                                    print(f"⏳ Waiting {health_retry_delay}s before retry...")
-                                    time.sleep(health_retry_delay)
-                                else:
-                                    print(f"⚠️ ArgoCD application {service_name} still deploying after {max_health_retries} attempts")
-                                    print(f"⏳ Proceeding anyway to avoid infinite wait...")
-                                    argocd_final = True  # Proceed anyway to avoid infinite wait
-                                    pods_final = True
-                                    break
-                            else:
-                                # Other statuses (Unknown, Degraded, etc.)
-                                if health_attempt < max_health_retries - 1:
-                                    print(f"⚠️ ArgoCD application {service_name} not ready yet (sync={sync_status}, health={health_status})")
-                                    print(f"⏳ Waiting {health_retry_delay}s before retry...")
-                                    time.sleep(health_retry_delay)
-                                else:
-                                    print(f"⚠️ ArgoCD application {service_name} still not ready after {max_health_retries} attempts")
-                                    print(f"⏳ Proceeding anyway to avoid infinite wait...")
-                                    argocd_final = True  # Proceed anyway to avoid infinite wait
-                                    pods_final = True
-                        else:
-                            if health_attempt < max_health_retries - 1:
-                                print(f"⚠️ Could not get ArgoCD status for {service_name}, retrying...")
-                                time.sleep(health_retry_delay)
-                            else:
-                                print(f"⚠️ Could not get ArgoCD status for {service_name} after {max_health_retries} attempts, proceeding anyway")
-                                argocd_final = True  # Proceed anyway on Railway
-                                pods_final = True
-                else:
-                    final_argocd_result = subprocess.run(['kubectl', 'get', 'application', service_name, '-n', 'argocd', '-o', 'jsonpath={.status.sync.status}'], 
-                                                       capture_output=True, text=True)
-                    final_pods_result = subprocess.run(['kubectl', 'get', 'pods', '-l', f'app={service_name}', '-n', service_name, '-o', 'jsonpath={.items[*].status.phase}'], 
-                                                     capture_output=True, text=True)
-                    
-                    argocd_final = final_argocd_result.returncode == 0 and final_argocd_result.stdout.strip() == 'Synced'
-                    pods_final = 'Running' in final_pods_result.stdout if final_pods_result.returncode == 0 else False
-                
-                if argocd_final and pods_final:
-                    # ArgoCD has synced, safe to delete YAML files
-                    print(f"ArgoCD synced successfully for {service_name}, deleting YAML files...")
-                    
-                    try:
-                        # Delete YAML files from Repo B
-                        yaml_files_to_delete = [
-                            'deployment.yaml',
-                            'service.yaml', 
-                            'configmap.yaml',
-                            'hpa.yaml',
-                            'ingress.yaml',
-                            'ingress-gateway.yaml',
-                            'namespace.yaml',
-                            'secret.yaml',
-                            'argocd-application.yaml'
-                        ]
-                        
-                        # Delete YAML files using GitHub API instead of git clone
-                        if is_railway_environment():
-                            print(f"Using GitHub API to delete YAML files for {service_name}")
-                            # Use GitHub API to delete files
-                            _delete_yaml_files_via_github_api(service_name, repo_b_url, yaml_files_to_delete)
-                            return  # Exit early for Railway environment
-                        else:
-                            # Use git commands for local development
-                            temp_dir = tempfile.gettempdir()
-                            clone_dir = os.path.join(temp_dir, f'repo_b_{service_name}_delete_{int(time.time())}')
-                        
-                        # Remove existing directory if it exists
-                        if os.path.exists(clone_dir):
-                            shutil.rmtree(clone_dir)
-                        
-                        print(f"Cloning repository to: {clone_dir}")
-                        clone_proc = subprocess.run(['git', 'clone', repo_b_url, clone_dir], 
-                                                  capture_output=True, text=True, timeout=60)
-                        
-                        if clone_proc.returncode != 0:
-                            print(f"Failed to clone repository: {clone_proc.stderr}")
-                            return
-                        
-                        # Check if service directory exists
-                        service_path = f"services/{service_name}/k8s"
-                        full_service_path = os.path.join(clone_dir, service_path)
-                        
-                        if not os.path.exists(full_service_path):
-                            print(f"Service directory not found: {service_path}")
-                            return
-                        
-                        # Delete each YAML file
-                        deleted_files = []
-                        for yaml_file in yaml_files_to_delete:
-                            file_path = os.path.join(full_service_path, yaml_file)
-                            if os.path.exists(file_path):
-                                os.remove(file_path)
-                                deleted_files.append(yaml_file)
-                                print(f"Deleted {yaml_file}")
-                        
-                        # Also delete the ArgoCD Application file under apps/
-                        apps_file = os.path.join(clone_dir, 'apps', f'{service_name}-application.yaml')
-                        if os.path.exists(apps_file):
-                            os.remove(apps_file)
-                            deleted_files.append(f'apps/{service_name}-application.yaml')
-                            print(f"Deleted apps/{service_name}-application.yaml")
-                        
-                        if not deleted_files:
-                            print("No YAML files found to delete")
-                            return
-                        
-                        # Remove empty directories
-                        remaining_files = os.listdir(full_service_path)
-                        if not remaining_files:
-                            os.rmdir(full_service_path)
-                            print(f"Deleted empty k8s directory")
-                        
-                        # Check if services directory is empty
-                        service_dir = os.path.join(clone_dir, 'services', service_name)
-                        if os.path.exists(service_dir) and not os.listdir(service_dir):
-                            os.rmdir(service_dir)
-                            print(f"Deleted empty service directory")
-                        
-                        # Commit and push deletion
-                        subprocess.run(['git', 'add', '--all'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'config', 'user.email', 'dev-portal@local'], cwd=clone_dir, check=True)
-                        subprocess.run(['git', 'config', 'user.name', 'Dev Portal'], cwd=clone_dir, check=True)
-                        
-                        # Check if there are changes
-                        st = subprocess.run(['git', 'status', '--porcelain'], cwd=clone_dir, capture_output=True, text=True, check=True)
-                        if st.stdout.strip():
-                            commit_proc = subprocess.run(['git', 'commit', '-m', f'Clean up YAML files for {service_name} after ArgoCD sync'], 
-                                                       cwd=clone_dir, capture_output=True, text=True)
-                            
-                            if commit_proc.returncode == 0:
-                                push_proc = subprocess.run(['git', 'push', 'origin', 'main'], 
-                                                        cwd=clone_dir, capture_output=True, text=True)
-                                
-                                if push_proc.returncode == 0:
-                                    print(f"✅ Successfully cleaned up {len(deleted_files)} YAML files for {service_name}")
-                                else:
-                                    print(f"❌ Failed to push changes: {push_proc.stderr}")
-                            else:
-                                print(f"❌ Failed to commit changes: {commit_proc.stderr}")
-                        else:
-                            print("No changes to commit")
-                        
-                        # Cleanup temp directory
-                        shutil.rmtree(clone_dir)
-                        print(f"Cleaned up temp directory")
-                        
-                    except Exception as cleanup_error:
-                        print(f"❌ Error during YAML cleanup: {cleanup_error}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print(f"ArgoCD sync not completed for {service_name}, keeping YAML files")
-                    
+                # Delete only config file (as requested)
+                print(f"🧹 Deleting configmap.yaml for {service_name} in Repo B...")
+                _delete_yaml_files_via_github_api(service_name, repo_b_url, ['configmap.yaml'])
             except Exception as e:
                 print(f"Error in delete_yaml_files_after_sync: {e}")
         
-        # Start background thread to delete YAML files
-        # NOTE: Disabled because ArgoCD Application is now created by CI/CD pipeline
-        # The CI/CD pipeline handles the complete flow including ArgoCD sync
-        # delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
-        # delete_thread.start()
-        print("ℹ️ Skipping YAML deletion - CI/CD pipeline handles ArgoCD deployment")
+        delete_thread = threading.Thread(target=delete_yaml_files_after_sync, args=(service_name, repo_b_url), daemon=True)
+        delete_thread.start()
 
         return {
             'success': True,
