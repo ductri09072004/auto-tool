@@ -9,7 +9,7 @@ import os
 # All tokens use the same value as requested
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 GHCR_TOKEN = os.getenv('GHCR_TOKEN', '')
-MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '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')
+MANIFESTS_REPO_TOKEN = os.getenv('MANIFESTS_REPO_TOKEN', '')
 ARGOCD_WEBHOOK_URL = os.getenv('ARGOCD_WEBHOOK_URL', 'https://auto-tool.up.railway.app/api/webhook')
 
 # ArgoCD API Configuration
