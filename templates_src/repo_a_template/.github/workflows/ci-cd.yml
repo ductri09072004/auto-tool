@@ -595,8 +595,8 @@ jobs:
         ARGOCD_PASSWORD="${{ secrets.ARGOCD_ADMIN_PASSWORD }}"
         
         if [ -z "$ARGOCD_SERVER" ] || [ -z "$ARGOCD_PASSWORD" ]; then
-          echo "⚠️ ArgoCD credentials not configured - cannot verify health"
-          echo "🔧 Proceeding with best-effort config cleanup in Repo B"
+          echo "⚠️ ArgoCD credentials not configured - skipping cleanup"
+          exit 0
         fi
         
         echo "⏳ Waiting for ArgoCD application to be healthy..."
@@ -626,8 +626,8 @@ jobs:
           echo "✅ ArgoCD server is reachable"
         fi
         
-        # Wait for ArgoCD to be healthy (max ~20 seconds)
-        MAX_ATTEMPTS=4
+        # Wait for ArgoCD to be healthy (max 10 seconds)
+        MAX_ATTEMPTS=2
         SLEEP_INTERVAL=5
         for i in $(seq 1 $MAX_ATTEMPTS); do
           echo "🔍 Checking ArgoCD status (attempt $i/$MAX_ATTEMPTS)..."
@@ -700,11 +700,22 @@ jobs:
               if [ "$HEALTH_STATUS" = "Healthy" ] && [ "$SYNC_STATUS" = "Synced" ]; then
                 echo "✅ ArgoCD application $SERVICE is healthy and synced!"
                 
-                # Cleanup ONLY config from Repo B (as requested)
-                echo "🧹 Cleaning up config file from Repo B..."
+                # Cleanup YAML files from Repo B
+                echo "🧹 Cleaning up YAML files from Repo B..."
                 cd manifests
                 
-                YAML_FILES=("services/$SERVICE/k8s/configmap.yaml")
+                # Files to delete
+                YAML_FILES=(
+                  "services/$SERVICE/k8s/deployment.yaml"
+                  "services/$SERVICE/k8s/service.yaml"
+                  "services/$SERVICE/k8s/configmap.yaml"
+                  "services/$SERVICE/k8s/hpa.yaml"
+                  "services/$SERVICE/k8s/ingress.yaml"
+                  "services/$SERVICE/k8s/ingress-gateway.yaml"
+                  "services/$SERVICE/k8s/namespace.yaml"
+                  "services/$SERVICE/k8s/secret.yaml"
+                  "apps/$SERVICE-application.yaml"
+                )
                 
                 # Delete files that exist
                 for file in "${YAML_FILES[@]}"; do
@@ -741,25 +752,16 @@ jobs:
           fi
         done
         
-        echo "⚠️ ArgoCD did not reach healthy status within ~20 seconds"
-        echo "🔧 Proceeding with best-effort config cleanup in Repo B regardless..."
-        cd manifests
-        BEST_EFFORT_FILE="services/$SERVICE/k8s/configmap.yaml"
-        if [ -f "$BEST_EFFORT_FILE" ]; then
-          echo "🗑️ Deleting $BEST_EFFORT_FILE"
-          git rm "$BEST_EFFORT_FILE" 2>/dev/null || rm -f "$BEST_EFFORT_FILE"
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add -A
-          if git diff --staged --quiet; then
-            echo "ℹ️ No changes to commit"
-          else
-            git commit -m "Cleanup config after deployment attempt - $SERVICE" || exit 0
-            git push || echo "⚠️ Push failed (non-blocking)"
-          fi
-          echo "✅ Best-effort config cleanup completed"
-        else
-          echo "ℹ️ Config file not found, nothing to delete"
-        fi
+        echo "⚠️ ArgoCD did not reach healthy status within 10 seconds"
+        echo "💡 Troubleshooting:"
+        echo "   1. Check ArgoCD UI at $ARGOCD_SERVER for detailed status"
+        echo "   2. Verify ARGOCD_SERVER_URL is correct and accessible: $ARGOCD_SERVER"
+        echo "   3. Check if ngrok tunnel is active (if using ngrok)"
+        echo "   4. Verify application $SERVICE exists in ArgoCD"
+        echo "   5. Check application logs in ArgoCD UI"
+        echo ""
+        echo "ℹ️ Skipping cleanup step - YAML files will remain in repo"
+        echo "   This is not a critical error - application may deploy successfully later"
+        echo "   You can manually cleanup YAML files after deployment is complete"
 
 
