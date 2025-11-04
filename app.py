@@ -4276,6 +4276,131 @@ def delete_service_yaml_templates(service_name):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/services/<service_name>/curl', methods=['POST'])
+def curl_service(service_name):
+    """Curl a service through the gateway via port-forward"""
+    try:
+        import platform
+        
+        # Default port for local port-forward (from user's requirement: 8081)
+        local_port = request.json.get('port', 8081) if request.is_json else 8081
+        endpoint = request.json.get('endpoint', '/api/health') if request.is_json else '/api/health'
+        
+        # Construct curl command
+        # User specified: curl.exe -v -H "Host: gateway.local" http://127.0.0.1:8081/api/zemo-v6aa/api/health
+        curl_url = f"http://127.0.0.1:{local_port}/api/{service_name}{endpoint}"
+        
+        # Use curl.exe on Windows, curl on Unix
+        curl_cmd = 'curl.exe' if platform.system() == 'Windows' else 'curl'
+        
+        curl_args = [
+            curl_cmd,
+            '-v',
+            '-H', 'Host: gateway.local',
+            curl_url
+        ]
+        
+        # Execute curl
+        result = subprocess.run(
+            curl_args,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        return jsonify({
+            'success': True,
+            'service_name': service_name,
+            'url': curl_url,
+            'stdout': result.stdout,
+            'stderr': result.stderr,
+            'returncode': result.returncode,
+            'command': ' '.join(curl_args)
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Curl command timed out',
+            'service_name': service_name
+        }), 500
+    except FileNotFoundError:
+        return jsonify({
+            'success': False,
+            'error': 'curl command not found. Please ensure curl is installed and in PATH.',
+            'service_name': service_name
+        }), 500
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'service_name': service_name
+        }), 500
+
+@app.route('/api/services/port-forward/ingress', methods=['POST'])
+def start_ingress_portforward():
+    """Start port-forward for ingress-nginx controller"""
+    try:
+        import psutil
+        
+        local_port = request.json.get('local_port', 8081) if request.is_json else 8081
+        
+        # Check if port-forward is already running
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline', [])
+                if any('kubectl' in str(cmd) for cmd in cmdline) and \
+                   any('port-forward' in str(cmd) for cmd in cmdline) and \
+                   any('ingress-nginx-controller' in str(cmd) for cmd in cmdline):
+                    return jsonify({
+                        'success': True,
+                        'message': 'Port-forward already running',
+                        'pid': proc.info['pid'],
+                        'local_port': local_port
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        # Start new port-forward
+        port_forward_cmd = [
+            'kubectl',
+            '-n', 'ingress-nginx',
+            'port-forward',
+            'svc/ingress-nginx-controller',
+            f'{local_port}:80'
+        ]
+        
+        process = subprocess.Popen(
+            port_forward_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # Wait a bit to see if it starts successfully
+        time.sleep(2)
+        
+        if process.poll() is not None:
+            # Process died immediately
+            stderr = process.stderr.read().decode() if process.stderr else ''
+            return jsonify({
+                'success': False,
+                'error': f'Port-forward failed to start: {stderr}',
+                'local_port': local_port
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'message': f'Port-forward started on localhost:{local_port}',
+            'pid': process.pid,
+            'local_port': local_port
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', 3050))

@@ -1195,6 +1195,30 @@
                                                     </a>
                                                 </div>
                                             </div>
+                                            <div class="row mb-2">
+                                                <div class="col-4"><strong>Test Service:</strong></div>
+                                                <div class="col-8">
+                                                    <button id="detail_curl_btn" class="btn btn-sm btn-primary" onclick="testServiceCurl()">
+                                                        <i class="fas fa-terminal me-1"></i>Curl Service
+                                                    </button>
+                                                    <button id="detail_portforward_btn" class="btn btn-sm btn-secondary ms-2" onclick="startPortForward()">
+                                                        <i class="fas fa-network-wired me-1"></i>Start Port-Forward
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="row mb-2" id="curl_result_container" style="display: none;">
+                                                <div class="col-12">
+                                                    <div class="card bg-light">
+                                                        <div class="card-header">
+                                                            <strong>Curl Result:</strong>
+                                                            <button type="button" class="btn-close float-end" onclick="document.getElementById('curl_result_container').style.display='none'"></button>
+                                                        </div>
+                                                        <div class="card-body">
+                                                            <pre id="curl_result" class="mb-0" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem;"></pre>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -2466,6 +2490,111 @@
             if (selectedService) {
                 deleteService(selectedService);
                 bootstrap.Modal.getInstance(document.getElementById('serviceActionsModal')).hide();
+            }
+        }
+
+        // Start port-forward for ingress-nginx
+        async function startPortForward() {
+            const btn = document.getElementById('detail_portforward_btn');
+            const originalText = btn.innerHTML;
+            const originalDisabled = btn.disabled;
+            
+            try {
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+                btn.disabled = true;
+                
+                const response = await fetch('/api/services/port-forward/ingress', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        local_port: 8081
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast(result.message || 'Port-forward started successfully', 'success');
+                } else {
+                    showToast(result.error || 'Failed to start port-forward', 'error');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = originalDisabled;
+            }
+        }
+
+        // Test service with curl
+        async function testServiceCurl() {
+            const serviceName = document.getElementById('detail_service_name').textContent;
+            if (!serviceName || serviceName === 'N/A') {
+                showToast('No service selected', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('detail_curl_btn');
+            const resultContainer = document.getElementById('curl_result_container');
+            const resultPre = document.getElementById('curl_result');
+            const originalText = btn.innerHTML;
+            const originalDisabled = btn.disabled;
+            
+            try {
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Curl...';
+                btn.disabled = true;
+                resultContainer.style.display = 'none';
+                
+                const response = await fetch(`/api/services/${serviceName}/curl`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        port: 8081,
+                        endpoint: '/api/health'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                // Show result
+                let output = '';
+                if (result.success) {
+                    output += `Command: ${result.command}\n`;
+                    output += `URL: ${result.url}\n`;
+                    output += `Return Code: ${result.returncode}\n\n`;
+                    
+                    if (result.stderr) {
+                        output += `STDERR:\n${result.stderr}\n\n`;
+                    }
+                    
+                    if (result.stdout) {
+                        output += `STDOUT:\n${result.stdout}\n`;
+                    }
+                    
+                    if (result.returncode === 0) {
+                        showToast('Curl completed successfully', 'success');
+                    } else {
+                        showToast(`Curl completed with return code ${result.returncode}`, 'warning');
+                    }
+                } else {
+                    output = `Error: ${result.error || 'Unknown error'}\n`;
+                    showToast(result.error || 'Curl failed', 'error');
+                }
+                
+                resultPre.textContent = output;
+                resultContainer.style.display = 'block';
+                
+            } catch (error) {
+                resultPre.textContent = `Error: ${error.message}`;
+                resultContainer.style.display = 'block';
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = originalDisabled;
             }
         }
 
